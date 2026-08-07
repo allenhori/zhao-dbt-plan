@@ -72,7 +72,7 @@ fn run(args: &cli::Cli) -> Result<(), String> {
             .clone()
             .map(|raw| shell_words::split(&raw))
             .transpose()
-            .map_err(|e| format!("zhao.yml dbt-plan.dbt-args: {e}"))?
+            .map_err(|e| format!("zhao.yml dbt-args: {e}"))?
             .unwrap_or_default(),
     };
 
