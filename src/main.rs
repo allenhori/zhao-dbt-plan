@@ -29,6 +29,20 @@ fn main() -> ExitCode {
 }
 
 fn run(args: &cli::Cli) -> Result<(), String> {
+    // `--anchor`'s mandatory-dates rule: checked first, before anything
+    // dbt-dependent, since it's a pure CLI-argument-shape validation that
+    // doesn't need a real dbt project to evaluate -- a deliberate, scoped
+    // exception to the *existing* no-anchor default-to-yesterday
+    // behavior (§4, `plan::AnchorSource::DefaultYesterday`), which stays
+    // completely unchanged for the no-`--anchor` case below.
+    if args.anchor.is_some() && (args.event_time_start.is_none() || args.event_time_end.is_none()) {
+        return Err(
+            "--anchor requires --event-time-start and --event-time-end to both be passed \
+             explicitly -- there is no yesterday-default when --anchor is used"
+                .to_string(),
+        );
+    }
+
     let project_dir = args
         .project_dir
         .clone()
@@ -124,6 +138,7 @@ fn run(args: &cli::Cli) -> Result<(), String> {
         &selected,
         explicit_window,
         max_window_expansion_days,
+        args.anchor.as_deref(),
     )
     .map_err(|e| e.to_string())?;
 
@@ -155,6 +170,15 @@ fn run(args: &cli::Cli) -> Result<(), String> {
         let html_path = html::default_output_path(&project_dir);
         output::write(&html_path, &html::generate(&built_plan))?;
         println!("wrote {}", html_path.display());
+    }
+
+    // Unconditional (not gated behind --pretty) -- silently assuming
+    // yesterday with no visible confirmation is exactly the footgun this
+    // note exists to prevent. Never fires on the --anchor path: dates are
+    // mandatory there (checked above), so this note is only ever
+    // possible when --anchor wasn't passed at all.
+    if let Some(note) = built_plan.default_yesterday_note() {
+        eprintln!("{note}");
     }
 
     for warning in &built_plan.warnings {

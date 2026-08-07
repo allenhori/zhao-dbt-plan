@@ -90,4 +90,19 @@ pub struct Cli {
     /// but `--against` is then simply unused.
     #[arg(long = "state")]
     pub state: Option<PathBuf>,
+
+    /// Names the single model within `--select`'s resolved selection
+    /// that the literal `--event-time-start`/`--event-time-end` window
+    /// actually anchors on, instead of applying to every Entry Node (the
+    /// default, no-`--anchor` behavior). Not inferred from `--select`'s
+    /// `+`/graph-operator shape -- deliberately, so this never needs to
+    /// parse any part of dbt's own selector grammar (see `select.rs`'s
+    /// module doc comment for the same principle already followed
+    /// there). Must name a model actually present in `--select`'s
+    /// resolved selection, or this fails with a clear error. When given,
+    /// `--event-time-start`/`--event-time-end` become mandatory -- there
+    /// is no yesterday-default on this path (see `plan.rs`'s module doc
+    /// comment for the full algorithm).
+    #[arg(long = "anchor")]
+    pub anchor: Option<String>,
 }

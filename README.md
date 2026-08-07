@@ -48,7 +48,16 @@ reimplementation, so anything real `dbt build --select ...` accepts here works i
 
 With no `--event-time-start`/`--event-time-end`, every Entry Node in the selection defaults to
 yesterday — meant to be run daily (e.g. as the first step of a cron/CI job), so the dates stay
-current.
+current. Whenever this default-yesterday path is taken, a note is printed to stderr
+unconditionally (not gated behind `--pretty`) so the assumption is never silent:
+
+```
+note: --event-time-start/--event-time-end not supplied, defaulting every Entry Node to yesterday (2026-08-07)
+```
+
+The same note is also recorded in the JSON's `metadata.anchor_window.note`, and shown as a
+banner in the `--html` report's header — see `--anchor` below for the one case where this
+default never applies.
 
 A model opts into cascading expansion via `config.meta.zhao` in its own `{{ config(...) }}`:
 
@@ -79,6 +88,47 @@ Entry Node within the selected subgraph. An Entry Node is `layer: 0`; every othe
 `1 + max(every upstream's layer)` — a diamond dependency (two upstream paths of different
 length) still collapses to one number, the longer path's `+1`. Lets you read the DAG's tier
 structure straight off the plan without tracing `depends_on` by hand.
+
+### `--anchor <model>`: pinning the literal window to a specific model
+
+By default, the literal `--event-time-start`/`--event-time-end` window (or the default-yesterday
+fallback) applies to every Entry Node in the selection — a selected model with no upstream
+dependency *within the selection* — and cascades forward from there. `--select '+model_c+'`
+(or `+model_c`, or `model_c+`) does **not**, by itself, pin the literal window on `model_c` —
+it still applies to whichever selected model(s) have no upstream dependency within the
+selection, which may be several hops upstream of `model_c`.
+
+`--anchor <model>` pins the literal window on that one named model instead, wherever it sits in
+the selected subgraph:
+
+```bash
+zhao-dbt-plan --select '+mb_orders_rolling_14d+' --anchor mb_orders_rolling_14d \
+  --event-time-start 2026-01-01 --event-time-end 2026-01-31
+```
+
+- **Downstream of the anchor**: the same forward-cascade formula as always, just starting from
+  the anchor's window instead of an Entry Node's.
+- **Upstream of the anchor**: walked backward, one edge at a time, applying the *same* formula
+  in reverse — at each hop, the upstream model's needed window is the downstream
+  (closer-to-anchor) model's own window, padded outward by that downstream model's own
+  `(lookback, lookahead)` config. Per-upstream overrides and multi-path bounding-box union both
+  apply with the same precedence they already have going forward.
+- **Anything in the selection with no path to/from the anchor**: untouched, using the normal
+  Entry-Node-based algorithm exactly as if `--anchor` weren't passed.
+
+`--anchor` is a single bare model name — not inferred from `--select`'s `+`/graph-operator shape,
+deliberately, so this addon never needs to parse any part of dbt's own selector grammar (the
+same reason `--select`/`--exclude` are forwarded verbatim to `dbt ls` rather than reimplemented).
+It must name a model actually present in `--select`'s *resolved* selection (post `dbt ls`), or
+this fails with a clear error naming both the requested anchor and what was actually selected.
+
+`--event-time-start`/`--event-time-end` become **mandatory** when `--anchor` is used — there is
+no yesterday-default on this path. `--anchor` is a deliberate, occasional, investigative
+operation (fixing a known bad date range), where silently defaulting to yesterday on a forgotten
+date flag would confidently compute a plan for the wrong window with no error at all.
+
+The plan JSON's `metadata` records which model was named, if any: `anchor_model` (omitted
+entirely, not `null`, when `--anchor` wasn't given).
 
 ### `--html`: an interactive visual report
 

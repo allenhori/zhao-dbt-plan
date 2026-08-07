@@ -98,13 +98,40 @@ pub fn generate(built_plan: &Plan) -> String {
 
     let data = GraphData { nodes, edges };
     let json = serde_json::to_string(&data).expect("graph data should always serialize");
-    render_html(&json)
+
+    // The same default-yesterday note shown unconditionally on stderr
+    // (`main.rs`) and in the JSON's `metadata.anchor_window.note`
+    // (`output.rs`) -- rendered here as a visible header banner rather
+    // than requiring the reader to already know to look for it. Absent
+    // entirely (no empty banner element left behind) when the plan used
+    // an explicit window -- see `Plan::default_yesterday_note`.
+    let banner_html = match built_plan.default_yesterday_note() {
+        Some(note) => format!(
+            r#"<div id="default-yesterday-banner">{}</div>"#,
+            escape_html(&note)
+        ),
+        None => String::new(),
+    };
+
+    render_html(&json, &banner_html)
+}
+
+/// Escapes the handful of characters that matter inside an HTML text
+/// node -- just enough for the plain, punctuation-only note text this is
+/// ever used on (see [`generate`]'s `banner_html`), not a general HTML
+/// escaper.
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Wraps the embedded JSON in the full HTML/CSS/JS document. Every other
 /// byte of markup/style/script is a plain string literal -- easy to audit
-/// for "no external references anywhere."
-fn render_html(graph_data_json: &str) -> String {
+/// for "no external references anywhere." `banner_html` is the
+/// default-yesterday note banner (already-rendered markup, or empty when
+/// there's nothing to show -- see [`generate`]).
+fn render_html(graph_data_json: &str, banner_html: &str) -> String {
     format!(
         r##"<!DOCTYPE html>
 <html lang="en">
@@ -117,6 +144,7 @@ fn render_html(graph_data_json: &str) -> String {
 </head>
 <body>
 <div class="viz-root">
+  {banner_html}
   <header id="toolbar">
     <div class="brand">zhao <span class="brand-sub">dbt-plan</span></div>
     <div class="search-wrap">
@@ -158,6 +186,7 @@ window.ZHAO_DBT_PLAN_DATA = {graph_data_json};
         CSS = CSS,
         JS = JS,
         graph_data_json = graph_data_json,
+        banner_html = banner_html,
     )
 }
 
@@ -202,6 +231,16 @@ body {
               var(--surface-2);
 }
 .viz-root { display: flex; flex-direction: column; height: 100vh; color: var(--text-primary); }
+
+/* The default-yesterday note, when the plan used it (see
+   `generate`/`Plan::default_yesterday_note`) -- a visible banner above
+   the toolbar, not buried, so a reader never has to already know to look
+   for it. Absent from the DOM entirely (not just hidden) when the plan
+   used an explicit window. */
+#default-yesterday-banner {
+  padding: 8px 20px; font-size: 12.5px; background: var(--series-model-soft);
+  color: var(--text-primary); border-bottom: 1px solid var(--border);
+}
 
 #toolbar {
   display: flex; align-items: center; gap: 20px;
@@ -567,6 +606,7 @@ mod tests {
         Plan {
             anchor_window: Window { start: d, end: d },
             anchor_source: AnchorSource::Explicit,
+            anchor_model: None,
             models: vec![
                 PlannedModel {
                     name: "mb_orders_daily".to_string(),
@@ -594,6 +634,28 @@ mod tests {
             ],
             warnings: Vec::new(),
         }
+    }
+
+    #[test]
+    fn the_default_yesterday_note_appears_as_a_header_banner_only_on_that_path() {
+        let mut defaulted = sample_plan();
+        defaulted.anchor_source = AnchorSource::DefaultYesterday;
+        let html = generate(&defaulted);
+        assert!(
+            html.contains(r#"<div id="default-yesterday-banner">"#),
+            "{html}"
+        );
+        assert!(html.contains("yesterday"), "{html}");
+
+        // The explicit path (sample_plan()'s default) must render no
+        // banner *element* at all -- the CSS rule for it is always
+        // present in the stylesheet (it's a plain string constant), so
+        // this checks for the `<div>` specifically, not the class name.
+        let explicit_html = generate(&sample_plan());
+        assert!(
+            !explicit_html.contains(r#"<div id="default-yesterday-banner">"#),
+            "an explicit-window plan must render no banner element at all: {explicit_html}"
+        );
     }
 
     #[test]
@@ -641,6 +703,7 @@ mod tests {
         let plan = Plan {
             anchor_window: Window { start: d, end: d },
             anchor_source: AnchorSource::Explicit,
+            anchor_model: None,
             models: vec![PlannedModel {
                 name: long_name.clone(),
                 window: Window { start: d, end: d },

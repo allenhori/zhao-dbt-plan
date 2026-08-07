@@ -350,6 +350,217 @@ fn without_the_html_flag_no_html_report_directory_is_created() {
     );
 }
 
+/// `--anchor` without both `--event-time-start`/`--event-time-end` fails
+/// fast with a clear error -- checked before anything dbt-dependent runs
+/// (see `main.rs`), so this needs no real `dbt` install and always runs,
+/// unlike most of this file's other tests.
+#[test]
+fn anchor_without_both_explicit_dates_is_a_clear_error() {
+    let empty_dir = tempfile::tempdir().expect("should create tempdir");
+
+    let assert = Command::cargo_bin("zhao-dbt-plan")
+        .expect("binary should build")
+        .arg("--project-dir")
+        .arg(empty_dir.path())
+        .arg("--select")
+        .arg("mb_orders_rolling_14d")
+        .arg("--anchor")
+        .arg("mb_orders_rolling_14d")
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("--anchor"), "{stderr}");
+    assert!(stderr.contains("--event-time-start"), "{stderr}");
+    assert!(stderr.contains("--event-time-end"), "{stderr}");
+}
+
+/// Same check, but with only one of the two dates supplied -- still a
+/// clear error, not silently falling back to a partial anchor.
+#[test]
+fn anchor_with_only_one_explicit_date_is_still_a_clear_error() {
+    let empty_dir = tempfile::tempdir().expect("should create tempdir");
+
+    let assert = Command::cargo_bin("zhao-dbt-plan")
+        .expect("binary should build")
+        .arg("--project-dir")
+        .arg(empty_dir.path())
+        .arg("--select")
+        .arg("mb_orders_rolling_14d")
+        .arg("--anchor")
+        .arg("mb_orders_rolling_14d")
+        .arg("--event-time-start")
+        .arg("2026-01-01")
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("--anchor"), "{stderr}");
+}
+
+/// `--anchor` naming a model outside the resolved `--select` produces a
+/// clear error naming both the requested anchor and what was actually
+/// selected. Needs a real `dbt ls` to resolve the selection first.
+#[test]
+fn anchor_naming_a_model_outside_the_selection_is_a_clear_error() {
+    if skip_if_dbt_unavailable() {
+        return;
+    }
+    let project = isolated_fixture_copy();
+    let output_path = project.path().join("dbt_plan.json");
+
+    let assert = Command::cargo_bin("zhao-dbt-plan")
+        .expect("binary should build")
+        .arg("--project-dir")
+        .arg(project.path())
+        .arg("--select")
+        .arg("tag:microbatch_demo")
+        .arg("--anchor")
+        .arg("unrelated_model")
+        .arg("--event-time-start")
+        .arg("2026-07-01")
+        .arg("--event-time-end")
+        .arg("2026-07-01")
+        .arg("--dbt-command")
+        .arg(dbt_command())
+        .arg("--dbt-args")
+        .arg("--target duckdb --profiles-dir .")
+        .arg("--output-file")
+        .arg(&output_path)
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("unrelated_model"), "{stderr}");
+    // Briefly names what was actually selected.
+    assert!(stderr.contains("mb_daily"), "{stderr}");
+}
+
+/// The full anchor fix from the issue: `--select '+mb_rolling_14d+'
+/// --anchor mb_rolling_14d` must apply the literal window to
+/// `mb_rolling_14d` itself (not the topological root, `mb_daily`), cascade
+/// forward downstream of it exactly as before, and cascade backward
+/// upstream of it via the new mirrored formula.
+#[test]
+fn anchor_pins_the_literal_window_on_the_named_model_not_the_topological_root() {
+    if skip_if_dbt_unavailable() {
+        return;
+    }
+    let project = isolated_fixture_copy();
+    let output_path = project.path().join("dbt_plan.json");
+
+    Command::cargo_bin("zhao-dbt-plan")
+        .expect("binary should build")
+        .arg("--project-dir")
+        .arg(project.path())
+        .arg("--select")
+        .arg("+mb_rolling_14d+")
+        .arg("--anchor")
+        .arg("mb_rolling_14d")
+        .arg("--event-time-start")
+        .arg("2026-01-01")
+        .arg("--event-time-end")
+        .arg("2026-01-31")
+        .arg("--dbt-command")
+        .arg(dbt_command())
+        .arg("--dbt-args")
+        .arg("--target duckdb --profiles-dir .")
+        .arg("--output-file")
+        .arg(&output_path)
+        .assert()
+        .success();
+
+    let contents = std::fs::read_to_string(&output_path).expect("should read plan output");
+    let plan: serde_json::Value = serde_json::from_str(&contents).expect("valid JSON");
+    let by_name: std::collections::HashMap<&str, &serde_json::Value> = plan["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| (m["name"].as_str().unwrap(), m))
+        .collect();
+
+    assert_eq!(plan["metadata"]["anchor_model"], "mb_rolling_14d");
+
+    // The named anchor gets the literal window, not the topological root.
+    assert_eq!(by_name["mb_rolling_14d"]["event_time_start"], "2026-01-01");
+    assert_eq!(by_name["mb_rolling_14d"]["event_time_end"], "2026-01-31");
+
+    // Upstream, walked backward: mb_rolling_7d (anchor's own
+    // lookback=2/lookahead=1) then mb_daily (mb_rolling_7d's own
+    // lookback=3/lookahead=4) -- the exact worked example from the issue.
+    assert_eq!(by_name["mb_rolling_7d"]["event_time_start"], "2025-12-30");
+    assert_eq!(by_name["mb_rolling_7d"]["event_time_end"], "2026-02-01");
+    assert_eq!(by_name["mb_daily"]["event_time_start"], "2025-12-27");
+    assert_eq!(by_name["mb_daily"]["event_time_end"], "2026-02-05");
+
+    // Downstream, unchanged forward cascade: mb_summary's own
+    // lookback=1/lookahead=1, unioned across both its upstreams (via
+    // mb_rolling_7d: [2025-12-29, 2026-02-02]; via mb_rolling_14d itself:
+    // [2025-12-31, 2026-02-01]) -- same multi-upstream union rule as
+    // always, just with mb_rolling_14d's own window now literal.
+    assert_eq!(by_name["mb_summary"]["event_time_start"], "2025-12-29");
+    assert_eq!(by_name["mb_summary"]["event_time_end"], "2026-02-02");
+
+    // No default-yesterday note on the --anchor path.
+    assert!(plan["metadata"]["anchor_window"]["note"].is_null());
+}
+
+/// The default-yesterday note appears unconditionally on stderr, in the
+/// JSON's `metadata.anchor_window.note`, and as an HTML banner -- but
+/// only on the no-`--anchor`, no-explicit-dates path.
+#[test]
+fn the_default_yesterday_note_appears_in_stderr_json_and_html_only_on_that_path() {
+    if skip_if_dbt_unavailable() {
+        return;
+    }
+    let project = isolated_fixture_copy();
+    let output_path = project.path().join("dbt_plan.json");
+
+    let assert = Command::cargo_bin("zhao-dbt-plan")
+        .expect("binary should build")
+        .arg("--project-dir")
+        .arg(project.path())
+        .arg("--select")
+        .arg("tag:microbatch_demo")
+        .arg("--dbt-command")
+        .arg(dbt_command())
+        .arg("--dbt-args")
+        .arg("--target duckdb --profiles-dir .")
+        .arg("--output-file")
+        .arg(&output_path)
+        .arg("--html")
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("note:"), "{stderr}");
+    assert!(stderr.contains("yesterday"), "{stderr}");
+    assert!(stderr.contains("--event-time-start"), "{stderr}");
+
+    let contents = std::fs::read_to_string(&output_path).expect("should read plan output");
+    let plan: serde_json::Value = serde_json::from_str(&contents).expect("valid JSON");
+    assert_eq!(
+        plan["metadata"]["anchor_window"]["source"],
+        "default_yesterday"
+    );
+    let note = plan["metadata"]["anchor_window"]["note"]
+        .as_str()
+        .expect("note should be present in JSON for the default-yesterday path");
+    assert!(note.contains("yesterday"), "{note}");
+
+    let html_dir = project.path().join("target").join("zhao").join("dbt-plan");
+    let entries: Vec<PathBuf> = std::fs::read_dir(&html_dir)
+        .unwrap_or_else(|e| panic!("should read {}: {e}", html_dir.display()))
+        .map(|e| e.expect("should read dir entry").path())
+        .collect();
+    let html = std::fs::read_to_string(&entries[0]).expect("should read the html report");
+    assert!(
+        html.contains(r#"<div id="default-yesterday-banner">"#),
+        "{html}"
+    );
+    assert!(html.contains("yesterday"), "{html}");
+}
+
 /// Pointed at a directory with no `dbt_project.yml` at all, `--project-dir`
 /// fails immediately with a clear, actionable error -- not a confusing
 /// `dbt`-subprocess-shaped failure several steps later. Doesn't need a
