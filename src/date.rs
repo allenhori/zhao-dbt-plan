@@ -60,7 +60,7 @@ impl Date {
         let (Ok(y), Ok(m), Ok(d)) = (y.parse::<i64>(), m.parse::<u32>(), d.parse::<u32>()) else {
             return Err(DateParseError(s.to_string()));
         };
-        if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        if !(1..=12).contains(&m) || d < 1 || d > days_in_month(y, m) {
             return Err(DateParseError(s.to_string()));
         }
         Ok(Date(days_from_civil(y, m, d)))
@@ -221,6 +221,23 @@ mod tests {
     fn rejects_a_malformed_string() {
         assert!(Date::parse("2026/07/01").is_err());
         assert!(Date::parse("not-a-date").is_err());
+    }
+
+    #[test]
+    fn rejects_a_day_that_does_not_exist_in_the_given_month() {
+        assert!(
+            Date::parse("2026-02-30").is_err(),
+            "February never has 30 days, even loosely"
+        );
+        assert!(Date::parse("2026-04-31").is_err(), "April only has 30 days");
+        assert!(
+            Date::parse("2024-02-29").is_ok(),
+            "2024 is a leap year, so Feb 29 is valid"
+        );
+        assert!(
+            Date::parse("2026-02-29").is_err(),
+            "2026 is not a leap year, so Feb 29 is invalid"
+        );
     }
 
     #[test]

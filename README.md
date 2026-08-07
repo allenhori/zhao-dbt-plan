@@ -89,12 +89,12 @@ verified to produce byte-identical plans from the identical project (see
 
 `zhao-dbt-plan` is zhao's first Addon — a standalone binary with no technical dependency on
 `zhao-cli` (this binary runs entirely on its own, as shown above, with zero `zhao-cli` install
-required). It's *designed* to also be discoverable as `zhao dbt-plan` once installed alongside
-`zhao-cli` on the same `PATH` (this `install.sh` installs to the same `~/.zhao/bin` directory
-`zhao-cli` uses, specifically for that), communicating purely through files. **That dispatch
-mechanism lives in `zhao-cli` itself and is still being built** (tracked as
-[allenhori/zhao#49](https://github.com/allenhori/zhao/issues/49)) — until it lands, use the
-standalone `zhao-dbt-plan` binary directly, as in every example above. See
+required). It's also discoverable as `zhao dbt-plan` once installed alongside `zhao-cli` on the
+same `PATH` (this `install.sh` installs to the same `~/.zhao/bin` directory `zhao-cli` uses,
+specifically for that) — `zhao-cli` finds any `zhao-<name>` binary on `PATH` and dispatches to it,
+forwarding all arguments and the exit code, communicating purely through files. So
+`zhao dbt-plan --select ...` and `zhao-dbt-plan --select ...` (standalone, as in every example
+above) are equivalent once both are installed. See
 [ADR 0010](https://github.com/allenhori/zhao/blob/master/docs/adr/0010-addon-interface-is-subprocess-plus-file-contract.md)
 for the design, and `zhao-cli`'s own `examples/hello-zhao-addon/` for a minimal reference
 implementation of the same contract, if you want to build your own Addon.

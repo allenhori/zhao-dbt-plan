@@ -80,6 +80,12 @@ pub enum SelectError {
 /// `project_dir`, returning the matched model `unique_id`s, cross-
 /// referenced against `manifest` (already-loaded, so this doesn't need
 /// to parse `dbt ls`'s own output into a full `Node` itself).
+///
+/// `state` is the manifest directory to pass as `dbt ls --state <dir>`,
+/// if the selector uses dbt's `state:` method -- see `state.rs` for how
+/// it's resolved (explicit `--state`, or git-natively). `None` when the
+/// selector doesn't need one at all.
+#[allow(clippy::too_many_arguments)]
 pub fn resolve(
     project_dir: &Path,
     manifest: &Manifest,
@@ -87,6 +93,7 @@ pub fn resolve(
     dbt_args: &[String],
     select: &str,
     exclude: Option<&str>,
+    state: Option<&Path>,
 ) -> Result<HashSet<String>, SelectError> {
     let mut parts = shell_words::split(dbt_command).map_err(|e| SelectError::Spawn {
         dbt_command: dbt_command.to_string(),
@@ -123,6 +130,10 @@ pub fn resolve(
             source: std::io::Error::other(format!("could not parse --exclude {exclude:?}: {e}")),
         })?;
         command.arg("--exclude").args(&exclude_parts);
+    }
+
+    if let Some(state) = state {
+        command.arg("--state").arg(state);
     }
 
     command.args(dbt_args).current_dir(project_dir);
@@ -212,18 +223,68 @@ mod tests {
         format!("sh -c 'cat <<EOF\n{stdout}EOF\n'")
     }
 
+    /// Like [`stub_dbt_command`], but also appends every forwarded
+    /// argument to `capture_path`, one invocation per line -- for
+    /// proving `resolve` actually passes a given flag through to `dbt
+    /// ls`, not just that it produces the right result. `--` after the
+    /// script makes `sh` treat every following word as a positional
+    /// argument (`$1`, `$2`, ...) rather than consuming the first one as
+    /// `$0`.
+    fn stub_dbt_command_capturing_args(stdout: &str, capture_path: &Path) -> String {
+        format!(
+            "sh -c 'echo \"$@\" >> \"{}\"; cat <<EOF\n{stdout}EOF\n' --",
+            capture_path.display()
+        )
+    }
+
     #[test]
     fn maps_dbt_ls_output_names_back_to_unique_ids() {
         let manifest = manifest_of(vec![model("model.p.a", "a"), model("model.p.b", "b")]);
         let dir = tempfile::tempdir().expect("should create tempdir");
         let stub = stub_dbt_command("a\nb\n");
 
-        let selected = resolve(dir.path(), &manifest, &stub, &[], "tag:whatever", None)
-            .expect("should resolve");
+        let selected = resolve(
+            dir.path(),
+            &manifest,
+            &stub,
+            &[],
+            "tag:whatever",
+            None,
+            None,
+        )
+        .expect("should resolve");
 
         assert_eq!(
             selected,
             HashSet::from(["model.p.a".to_string(), "model.p.b".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_given_state_path_is_forwarded_to_dbt_ls() {
+        let manifest = manifest_of(vec![model("model.p.a", "a")]);
+        let dir = tempfile::tempdir().expect("should create tempdir");
+        let capture_path = dir.path().join("captured_args.txt");
+        let stub = stub_dbt_command_capturing_args("a\n", &capture_path);
+        let state_dir = dir.path().join("baseline-manifest-dir");
+
+        resolve(
+            dir.path(),
+            &manifest,
+            &stub,
+            &[],
+            "state:modified+",
+            None,
+            Some(&state_dir),
+        )
+        .expect("should resolve");
+
+        let captured =
+            std::fs::read_to_string(&capture_path).expect("stub should have captured argv");
+        assert!(captured.contains("--state"), "{captured}");
+        assert!(
+            captured.contains(&state_dir.display().to_string()),
+            "{captured}"
         );
     }
 
@@ -233,7 +294,16 @@ mod tests {
         let dir = tempfile::tempdir().expect("should create tempdir");
         let stub = stub_dbt_command("nonexistent_model\n");
 
-        let err = resolve(dir.path(), &manifest, &stub, &[], "tag:whatever", None).unwrap_err();
+        let err = resolve(
+            dir.path(),
+            &manifest,
+            &stub,
+            &[],
+            "tag:whatever",
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(
             matches!(err, SelectError::UnknownModel { name, .. } if name == "nonexistent_model")
         );
@@ -245,8 +315,16 @@ mod tests {
         let dir = tempfile::tempdir().expect("should create tempdir");
         let stub = stub_dbt_command("a\n\n\n");
 
-        let selected = resolve(dir.path(), &manifest, &stub, &[], "tag:whatever", None)
-            .expect("should resolve");
+        let selected = resolve(
+            dir.path(),
+            &manifest,
+            &stub,
+            &[],
+            "tag:whatever",
+            None,
+            None,
+        )
+        .expect("should resolve");
         assert_eq!(selected, HashSet::from(["model.p.a".to_string()]));
     }
 
@@ -261,6 +339,7 @@ mod tests {
             "this-command-does-not-exist",
             &[],
             "tag:whatever",
+            None,
             None,
         )
         .unwrap_err();
