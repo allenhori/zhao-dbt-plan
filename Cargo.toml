@@ -1,7 +1,7 @@
 [package]
 name = "zhao-dbt-plan"
 description = "Static microbatch cascading time-window planner for dbt -- a zhao-cli Addon."
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 license = "AGPL-3.0-or-later"
