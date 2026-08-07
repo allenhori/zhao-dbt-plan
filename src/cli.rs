@@ -52,6 +52,14 @@ pub struct Cli {
     #[arg(long = "pretty")]
     pub pretty: bool,
 
+    /// Also writes a self-contained, interactive HTML visual report to
+    /// `<project-dir>/target/zhao/dbt-plan/dbt_plan_<timestamp>.html` --
+    /// a directory distinct from wherever the JSON goes. Opt-in only,
+    /// like `--pretty`: never generated unless this is passed, since most
+    /// runs (typically CI, disposable) don't need it.
+    #[arg(long = "html")]
+    pub html: bool,
+
     /// Executable/prefix used for every internal `dbt` invocation this
     /// addon makes (`dbt parse` for manifest freshness, `dbt ls` for
     /// selection). Precedence: this flag, then `zhao.yml`'s

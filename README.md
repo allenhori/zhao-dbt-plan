@@ -80,6 +80,25 @@ Entry Node within the selected subgraph. An Entry Node is `layer: 0`; every othe
 length) still collapses to one number, the longer path's `+1`. Lets you read the DAG's tier
 structure straight off the plan without tracing `depends_on` by hand.
 
+### `--html`: an interactive visual report
+
+```bash
+zhao-dbt-plan --select tag:daily --event-time-start 2026-07-01 --event-time-end 2026-07-01 --html
+```
+
+Opt-in, like `--pretty` — never generated unless `--html` is passed, since most runs (typically
+CI, disposable) don't need it. Writes a self-contained, interactive HTML file to
+`<project-dir>/target/zhao/dbt-plan/dbt_plan_<YYYYMMDDHHMMSS>.html` (UTC, timestamped so repeat
+runs never collide and nothing needs cleaning up) — a directory distinct from wherever the JSON's
+`--output-file` goes, and it never changes the JSON's own default path or contents.
+
+Each model is a node showing its full name, computed date-range window, and layer, laid out by
+layer with its downstream connections drawn so the cascading structure is visible without reading
+JSON at all. All interactivity (search, highlighting the upstream/downstream chain on selection,
+a resizable side panel) runs client-side in plain JavaScript against an embedded JSON blob — no
+network access, no CDN reference anywhere, works fully offline. Model names are never truncated,
+regardless of length — node boxes wrap to fit the full name rather than clipping it.
+
 Run `zhao-dbt-plan --help` for the full flag reference; the plan JSON's shape is documented
 inline in `src/output.rs`.
 

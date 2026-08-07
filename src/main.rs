@@ -7,6 +7,7 @@ mod config;
 mod date;
 mod detect;
 mod git;
+mod html;
 mod manifest;
 mod output;
 mod plan;
@@ -148,6 +149,12 @@ fn run(args: &cli::Cli) -> Result<(), String> {
 
     if args.pretty {
         print!("{}", output::render_tree(&built_plan));
+    }
+
+    if args.html {
+        let html_path = html::default_output_path(&project_dir);
+        output::write(&html_path, &html::generate(&built_plan))?;
+        println!("wrote {}", html_path.display());
     }
 
     for warning in &built_plan.warnings {
