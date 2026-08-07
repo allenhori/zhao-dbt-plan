@@ -162,11 +162,14 @@ pub fn build(
     for id in &order {
         let node = &manifest.nodes[*id];
         let deps = &within_selection[id];
+        // Computed once per node and reused below (both for the window
+        // expansion math and the PlannedModel's own recorded
+        // lookback/lookahead), rather than cloning it twice.
+        let zhao_meta = node.zhao_meta.clone().unwrap_or_default();
 
         let window = if deps.is_empty() {
             anchor_window
         } else {
-            let zhao_meta = node.zhao_meta.clone().unwrap_or_default();
             deps.iter()
                 .map(|upstream_id| {
                     let upstream_name = &manifest.nodes[*upstream_id].name;
@@ -223,7 +226,6 @@ pub fn build(
             });
         }
 
-        let zhao_meta = node.zhao_meta.clone().unwrap_or_default();
         models.push(PlannedModel {
             name: node.name.clone(),
             window,
