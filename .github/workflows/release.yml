@@ -1,0 +1,127 @@
+name: Release
+
+# Two release channels, both produced by the same cross-compiled binary
+# matrix -- same pattern as zhao-cli's own release.yml:
+#
+#   - Stable: triggered by pushing a `v*` tag. Permanent, semver-tagged
+#     GitHub Release. Never overwritten.
+#   - Nightly: triggered on a daily schedule (and manually, via
+#     workflow_dispatch) off `master`'s current tip. The `nightly` git tag
+#     is force-moved to that commit each run.
+
+on:
+  push:
+    tags: ["v*"]
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/zhao-dbt-plan dist/zhao-dbt-plan
+          tar -C dist -czf zhao-dbt-plan-${{ matrix.target }}.tar.gz zhao-dbt-plan
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/zhao-dbt-plan.exe" "dist/zhao-dbt-plan.exe"
+          Compress-Archive -Path "dist/zhao-dbt-plan.exe" -DestinationPath "zhao-dbt-plan-${{ matrix.target }}.zip"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: zhao-dbt-plan-${{ matrix.target }}
+          path: zhao-dbt-plan-${{ matrix.target }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Determine release channel (stable)
+        id: stable
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          echo "name=zhao-dbt-plan ${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine release channel (nightly)
+        id: nightly
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        run: |
+          echo "tag=nightly" >> "$GITHUB_OUTPUT"
+          echo "name=zhao-dbt-plan nightly ($(date -u +%Y-%m-%d))" >> "$GITHUB_OUTPUT"
+
+      - name: Set channel outputs
+        id: channel
+        run: |
+          echo "tag=${{ steps.stable.outputs.tag || steps.nightly.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          echo "name=${{ steps.stable.outputs.name || steps.nightly.outputs.name }}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${{ steps.stable.outcome != 'success' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Move the nightly tag
+        if: steps.channel.outputs.tag == 'nightly'
+        run: |
+          git tag -f nightly
+          git push origin nightly --force
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.channel.outputs.tag }}
+          name: ${{ steps.channel.outputs.name }}
+          prerelease: ${{ steps.channel.outputs.prerelease }}
+          generate_release_notes: true
+          make_latest: ${{ steps.channel.outputs.prerelease == 'false' }}
+          body: ${{ steps.channel.outputs.prerelease == 'true' && 'Automated build from the latest `master` -- not a stable release. May be broken; use a `v*` tag for anything you depend on.' || '' }}
+          files: dist/*

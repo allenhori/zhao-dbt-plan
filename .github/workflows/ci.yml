@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      # tests/end_to_end.rs needs a real dbt to exercise --select/--exclude
+      # passthrough (via `dbt ls`) and manifest-freshness (`dbt parse`)
+      # against the self-contained fixture project under
+      # tests/fixtures/dbt_project/ -- installed here, pointed at via
+      # ZHAO_DBT_PLAN_TEST_DBT_COMMAND, rather than assumed to exist.
+      - name: Install dbt-core
+        run: |
+          python -m venv .venv-dbt
+          .venv-dbt/bin/pip install dbt-core dbt-duckdb
+      - run: cargo test --all-features
+        env:
+          ZHAO_DBT_PLAN_TEST_DBT_COMMAND: ${{ github.workspace }}/.venv-dbt/bin/dbt
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  # missing_docs is a crate-level deny, so it already fails `test`/`clippy`
+  # above on any undocumented public item. This job additionally catches
+  # broken intra-doc links and other rustdoc-only issues.
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --no-deps --document-private-items

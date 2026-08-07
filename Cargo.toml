@@ -1,0 +1,35 @@
+[package]
+name = "zhao-dbt-plan"
+description = "Static microbatch cascading time-window planner for dbt -- a zhao-cli Addon."
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/allenhori/zhao-dbt-plan"
+
+[[bin]]
+name = "zhao-dbt-plan"
+path = "src/main.rs"
+
+[lints.rust]
+# Every public item must be documented -- same policy zhao-cli/zhao-core
+# enforce, kept consistent since this is meant to be a readable reference
+# for how to build a zhao-cli Addon, not just a working one.
+missing_docs = "deny"
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+
+[dependencies]
+clap = { version = "4.6.5", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+serde_yaml = "0.9.34"
+shell-words = "1.1.1"
+tempfile = "3.27.0"
+thiserror = "2.0.19"
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+predicates = "3.1.4"

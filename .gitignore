@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+
+# Runtime artifacts from tests/fixtures/dbt_project/ -- see tests/end_to_end.rs,
+# which always runs against an isolated tempdir copy, never this directory
+# directly, but a manual `dbt` invocation against it locally would still
+# produce these.
+tests/fixtures/dbt_project/target/
+tests/fixtures/dbt_project/logs/
+tests/fixtures/dbt_project/*.duckdb
+tests/fixtures/dbt_project/.user.yml

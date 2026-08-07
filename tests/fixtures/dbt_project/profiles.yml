@@ -1,0 +1,7 @@
+zhao_dbt_plan_fixture:
+  target: duckdb
+  outputs:
+    duckdb:
+      type: duckdb
+      path: 'fixture.duckdb'
+      threads: 4

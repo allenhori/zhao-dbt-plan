@@ -1,0 +1,11 @@
+name: zhao_dbt_plan_fixture
+version: '1.0.0'
+config-version: 2
+
+profile: 'zhao_dbt_plan_fixture'
+
+model-paths: ["models"]
+
+target-path: "target"
+clean-targets:
+  - "target"
