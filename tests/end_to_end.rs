@@ -261,6 +261,95 @@ fn pretty_flag_renders_a_tree_to_stdout_in_addition_to_writing_json() {
     );
 }
 
+/// `--html` writes a timestamped file to `target/zhao/dbt-plan/`, a
+/// directory distinct from wherever `--output-file`'s JSON goes -- and
+/// leaves the JSON's own path/contents completely alone.
+#[test]
+fn html_flag_writes_a_report_to_its_own_directory_without_touching_the_json() {
+    if skip_if_dbt_unavailable() {
+        return;
+    }
+    let project = isolated_fixture_copy();
+    let output_path = project.path().join("dbt_plan.json");
+
+    Command::cargo_bin("zhao-dbt-plan")
+        .expect("binary should build")
+        .arg("--project-dir")
+        .arg(project.path())
+        .arg("--select")
+        .arg("tag:microbatch_demo")
+        .arg("--event-time-start")
+        .arg("2026-07-01")
+        .arg("--event-time-end")
+        .arg("2026-07-01")
+        .arg("--dbt-command")
+        .arg(dbt_command())
+        .arg("--dbt-args")
+        .arg("--target duckdb --profiles-dir .")
+        .arg("--output-file")
+        .arg(&output_path)
+        .arg("--html")
+        .assert()
+        .success();
+
+    assert!(
+        output_path.exists(),
+        "the JSON file should still be written"
+    );
+
+    let html_dir = project.path().join("target").join("zhao").join("dbt-plan");
+    let entries: Vec<PathBuf> = std::fs::read_dir(&html_dir)
+        .unwrap_or_else(|e| panic!("should read {}: {e}", html_dir.display()))
+        .map(|e| e.expect("should read dir entry").path())
+        .collect();
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    let html_path = &entries[0];
+    let file_name = html_path.file_name().unwrap().to_string_lossy();
+    assert!(file_name.starts_with("dbt_plan_"), "{file_name}");
+    assert!(file_name.ends_with(".html"), "{file_name}");
+
+    let html = std::fs::read_to_string(html_path).expect("should read the html report");
+    assert!(html.contains("mb_daily"));
+    assert!(html.contains("mb_rolling_7d"));
+    assert!(html.contains("2026-06-28"));
+}
+
+/// Not passing `--html` at all must never create `target/zhao/dbt-plan/`
+/// -- the report is strictly opt-in.
+#[test]
+fn without_the_html_flag_no_html_report_directory_is_created() {
+    if skip_if_dbt_unavailable() {
+        return;
+    }
+    let project = isolated_fixture_copy();
+    let output_path = project.path().join("dbt_plan.json");
+
+    Command::cargo_bin("zhao-dbt-plan")
+        .expect("binary should build")
+        .arg("--project-dir")
+        .arg(project.path())
+        .arg("--select")
+        .arg("tag:microbatch_demo")
+        .arg("--event-time-start")
+        .arg("2026-07-01")
+        .arg("--event-time-end")
+        .arg("2026-07-01")
+        .arg("--dbt-command")
+        .arg(dbt_command())
+        .arg("--dbt-args")
+        .arg("--target duckdb --profiles-dir .")
+        .arg("--output-file")
+        .arg(&output_path)
+        .assert()
+        .success();
+
+    let html_dir = project.path().join("target").join("zhao").join("dbt-plan");
+    assert!(
+        !html_dir.exists(),
+        "no --html report should be written unless --html is passed"
+    );
+}
+
 /// Pointed at a directory with no `dbt_project.yml` at all, `--project-dir`
 /// fails immediately with a clear, actionable error -- not a confusing
 /// `dbt`-subprocess-shaped failure several steps later. Doesn't need a

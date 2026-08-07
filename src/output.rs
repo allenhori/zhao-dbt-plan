@@ -66,6 +66,7 @@ struct ModelDocument {
     lookahead: i64,
     lookahead_unit: crate::date::TimeUnit,
     depends_on: Vec<String>,
+    layer: usize,
 }
 
 /// Renders `built_plan` into the final plan-JSON document (pretty-printed
@@ -108,6 +109,7 @@ pub fn render(built_plan: &Plan, metadata: &Metadata) -> String {
                 lookahead: m.lookahead,
                 lookahead_unit: m.lookahead_unit,
                 depends_on: m.depends_on.clone(),
+                layer: m.layer,
             })
             .collect(),
     };
@@ -134,27 +136,18 @@ pub fn write(path: &Path, contents: &str) -> Result<(), String> {
 }
 
 /// A minimal ASCII tree of the plan, for `--pretty` -- one line per
-/// model, indented by its position in the within-plan dependency chain.
-/// `built_plan.models` is already in topological order, so this is a
-/// straightforward depth computation from each model's own
-/// `depends_on` list, not a second graph walk.
+/// model, indented by its `layer` (see [`crate::plan::PlannedModel::layer`])
+/// and labeling it explicitly. `built_plan.models` is already in
+/// topological order and already carries `layer` (computed once in
+/// `plan::build`), so this is purely a formatting pass now -- no depth
+/// math of its own.
 pub fn render_tree(built_plan: &Plan) -> String {
-    use std::collections::HashMap;
-
-    let mut depth: HashMap<&str, usize> = HashMap::new();
     let mut out = String::new();
     for model in &built_plan.models {
-        let d = model
-            .depends_on
-            .iter()
-            .filter_map(|dep| depth.get(dep.as_str()))
-            .max()
-            .map(|d| d + 1)
-            .unwrap_or(0);
-        depth.insert(&model.name, d);
-        let indent = "  ".repeat(d);
+        let indent = "  ".repeat(model.layer);
         out.push_str(&format!(
-            "{indent}{name} [{start} .. {end}]\n",
+            "{indent}[layer {layer}] {name} [{start} .. {end}]\n",
+            layer = model.layer,
             name = model.name,
             start = model.window.start,
             end = model.window.end,
@@ -163,11 +156,13 @@ pub fn render_tree(built_plan: &Plan) -> String {
     out
 }
 
-/// The current time as an RFC 3339 timestamp -- built by hand from
-/// [`crate::date::Date`]'s own day-count arithmetic plus the
-/// within-day seconds, rather than pulling in a date/time crate for the
-/// one timestamp this addon ever needs to print.
-fn now_rfc3339() -> String {
+/// The current UTC date plus within-day `(hour, minute, second)` -- built
+/// by hand from [`crate::date::Date`]'s own day-count arithmetic rather
+/// than pulling in a date/time crate for the couple of timestamp shapes
+/// this addon ever needs to print (RFC 3339 for the JSON's
+/// `generated_at`, and the compact numeric form for `--html`'s
+/// filename -- see [`now_rfc3339`] and [`now_compact_utc_timestamp`]).
+fn now_utc_components() -> (crate::date::Date, u32, u32, u32) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
@@ -175,12 +170,28 @@ fn now_rfc3339() -> String {
     let days = (total_seconds / 86_400) as i64;
     let seconds_of_day = total_seconds % 86_400;
     let (h, m, s) = (
-        seconds_of_day / 3600,
-        (seconds_of_day % 3600) / 60,
-        seconds_of_day % 60,
+        (seconds_of_day / 3600) as u32,
+        ((seconds_of_day % 3600) / 60) as u32,
+        (seconds_of_day % 60) as u32,
     );
-    let date = crate::date::Date::from_days_since_epoch(days);
+    (crate::date::Date::from_days_since_epoch(days), h, m, s)
+}
+
+/// The current time as an RFC 3339 timestamp.
+fn now_rfc3339() -> String {
+    let (date, h, m, s) = now_utc_components();
     format!("{date}T{h:02}:{m:02}:{s:02}Z")
+}
+
+/// The current time as a compact, zero-padded `YYYYMMDDHHMMSS` (UTC) --
+/// used for `--html`'s output filename (`dbt_plan_<...>.html`), so
+/// repeat runs never collide and files sort chronologically by name.
+/// `Date`'s own `YYYY-MM-DD` [`Display`](std::fmt::Display) already has
+/// every digit this needs; this just strips the dashes rather than
+/// re-deriving year/month/day itself.
+pub(crate) fn now_compact_utc_timestamp() -> String {
+    let (date, h, m, s) = now_utc_components();
+    format!("{}{h:02}{m:02}{s:02}", date.to_string().replace('-', ""))
 }
 
 #[cfg(test)]
@@ -203,6 +214,7 @@ mod tests {
                     lookahead: 0,
                     lookahead_unit: crate::date::TimeUnit::Day,
                     depends_on: Vec::new(),
+                    layer: 0,
                 },
                 PlannedModel {
                     name: "b".to_string(),
@@ -215,6 +227,7 @@ mod tests {
                     lookahead: 4,
                     lookahead_unit: crate::date::TimeUnit::Day,
                     depends_on: vec!["a".to_string()],
+                    layer: 1,
                 },
             ],
             warnings: vec![Warning {
@@ -252,6 +265,8 @@ mod tests {
         assert_eq!(parsed["models"][1]["event_time_start"], "2026-06-28");
         assert_eq!(parsed["models"][1]["event_time_end"], "2026-07-05");
         assert_eq!(parsed["models"][1]["depends_on"][0], "a");
+        assert_eq!(parsed["models"][0]["layer"], 0);
+        assert_eq!(parsed["models"][1]["layer"], 1);
     }
 
     #[test]
@@ -278,8 +293,8 @@ mod tests {
         let built = sample_plan();
         let tree = render_tree(&built);
         let lines: Vec<&str> = tree.lines().collect();
-        assert!(lines[0].starts_with("a "));
-        assert!(lines[1].starts_with("  b "));
+        assert!(lines[0].starts_with("[layer 0] a "));
+        assert!(lines[1].starts_with("  [layer 1] b "));
     }
 
     #[test]

@@ -65,6 +65,15 @@ pub struct PlannedModel {
     /// Direct upstream dependencies *within the plan* (not the whole
     /// project graph), by bare name -- see §8.
     pub depends_on: Vec<String>,
+    /// Longest-path depth from an Entry Node, within the selected
+    /// subgraph only -- an Entry Node (no `depends_on` within the
+    /// selection) is layer 0; every other model is `1 + max(every
+    /// upstream's layer)`. A diamond dependency (two upstream paths of
+    /// different length) still collapses to one number, the longer
+    /// path's `+1` -- same "good enough to read the DAG's tiers" call
+    /// `render_tree`'s original depth math already made before this
+    /// field existed to name it.
+    pub layer: usize,
 }
 
 /// A non-fatal issue surfaced alongside an otherwise-complete plan (§6's
@@ -156,6 +165,11 @@ pub fn build(
     let order = topological_order(&within_selection)?;
 
     let mut windows: HashMap<&str, Window> = HashMap::new();
+    // Computed alongside `windows` in the same single topological pass --
+    // `order` guarantees every upstream `id` is already in `layers` by
+    // the time a downstream node looks it up. See `PlannedModel::layer`'s
+    // doc comment for the rule itself.
+    let mut layers: HashMap<&str, usize> = HashMap::new();
     let mut models = Vec::with_capacity(order.len());
     let mut warnings = Vec::new();
 
@@ -199,6 +213,14 @@ pub fn build(
 
         windows.insert(id, window);
 
+        let layer = deps
+            .iter()
+            .map(|dep_id| layers[dep_id])
+            .max()
+            .map(|d| d + 1)
+            .unwrap_or(0);
+        layers.insert(id, layer);
+
         if window.span_days() > max_window_expansion_days {
             warnings.push(Warning {
                 model: node.name.clone(),
@@ -237,6 +259,7 @@ pub fn build(
                 .iter()
                 .map(|dep_id| manifest.nodes[*dep_id].name.clone())
                 .collect(),
+            layer,
         });
     }
 
@@ -503,6 +526,80 @@ mod tests {
 
         assert_eq!(plan.anchor_window.start, Date::yesterday());
         assert!(matches!(plan.anchor_source, AnchorSource::DefaultYesterday));
+    }
+
+    #[test]
+    fn entry_nodes_are_layer_zero_and_layer_increments_along_a_chain() {
+        let manifest = manifest_of(vec![
+            model("model.p.a", "a", &[], None),
+            model("model.p.b", "b", &["model.p.a"], Some(meta(3, 4))),
+            model("model.p.c", "c", &["model.p.b"], Some(meta(2, 1))),
+        ]);
+        let selected = HashSet::from([
+            "model.p.a".to_string(),
+            "model.p.b".to_string(),
+            "model.p.c".to_string(),
+        ]);
+        let anchor = Date::parse("2026-07-01").unwrap();
+        let plan = build(&manifest, &selected, Some((anchor, anchor)), 90).expect("should build");
+
+        let by_name: HashMap<&str, &PlannedModel> =
+            plan.models.iter().map(|m| (m.name.as_str(), m)).collect();
+        assert_eq!(by_name["a"].layer, 0);
+        assert_eq!(by_name["b"].layer, 1);
+        assert_eq!(by_name["c"].layer, 2);
+    }
+
+    #[test]
+    fn a_diamond_dependency_takes_the_longer_upstream_path_plus_one() {
+        // a -> b -> d
+        // a -> d (direct, shorter path)
+        // d's two upstreams are b (layer 1) and a (layer 0) -- the
+        // longer path (through b) must win: d's layer is 2, not 1.
+        let manifest = manifest_of(vec![
+            model("model.p.a", "a", &[], None),
+            model("model.p.b", "b", &["model.p.a"], None),
+            model(
+                "model.p.d",
+                "d",
+                &["model.p.a", "model.p.b"],
+                Some(meta(1, 1)),
+            ),
+        ]);
+        let selected = HashSet::from([
+            "model.p.a".to_string(),
+            "model.p.b".to_string(),
+            "model.p.d".to_string(),
+        ]);
+        let anchor = Date::parse("2026-07-01").unwrap();
+        let plan = build(&manifest, &selected, Some((anchor, anchor)), 90).expect("should build");
+
+        let by_name: HashMap<&str, &PlannedModel> =
+            plan.models.iter().map(|m| (m.name.as_str(), m)).collect();
+        assert_eq!(by_name["a"].layer, 0);
+        assert_eq!(by_name["b"].layer, 1);
+        assert_eq!(
+            by_name["d"].layer, 2,
+            "d's layer must come from its longer upstream path (through b), not the shorter \
+             direct edge from a"
+        );
+    }
+
+    #[test]
+    fn an_entry_node_created_by_an_unselected_upstream_is_layer_zero() {
+        // Same scenario as `depends_on_only_lists_dependencies_within_the_selection`:
+        // b's only real dependency (a) isn't selected, so b becomes an
+        // Entry Node in this plan and must be layer 0, not treat its
+        // unselected upstream as contributing to its depth.
+        let manifest = manifest_of(vec![
+            model("model.p.a", "a", &[], None),
+            model("model.p.b", "b", &["model.p.a"], Some(meta(3, 3))),
+        ]);
+        let selected = HashSet::from(["model.p.b".to_string()]);
+        let anchor = Date::parse("2026-07-01").unwrap();
+        let plan = build(&manifest, &selected, Some((anchor, anchor)), 90).expect("should build");
+
+        assert_eq!(plan.models[0].layer, 0);
     }
 
     #[test]

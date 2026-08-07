@@ -9,11 +9,11 @@ per-model expanded window — as a plan you review, never a command it runs for 
 
 ```
 $ zhao-dbt-plan --select tag:microbatch_demo --event-time-start 2026-07-01 --event-time-end 2026-07-01 --pretty
-mb_orders_daily [2026-07-01 .. 2026-07-01]
-  mb_orders_rolling_7d [2026-06-28 .. 2026-07-05]
-    mb_orders_rolling_14d [2026-06-26 .. 2026-07-06]
-      mb_orders_summary [2026-06-25 .. 2026-07-07]
-      mb_orders_wide_lookback [2026-04-07 .. 2026-07-11]
+[layer 0] mb_orders_daily [2026-07-01 .. 2026-07-01]
+  [layer 1] mb_orders_rolling_7d [2026-06-28 .. 2026-07-05]
+    [layer 2] mb_orders_rolling_14d [2026-06-26 .. 2026-07-06]
+      [layer 3] mb_orders_summary [2026-06-25 .. 2026-07-07]
+      [layer 3] mb_orders_wide_lookback [2026-04-07 .. 2026-07-11]
 warning: mb_orders_wide_lookback: expanded window (96 days) exceeds max_window_expansion_days (90)
 ```
 
@@ -73,6 +73,31 @@ Per-upstream overrides (different lookback depending on *which* upstream) via
 `lookback_overrides`/`lookahead_overrides`, keyed by the upstream model's bare name, e.g.
 `{'lookback_overrides': {'orders': 5}}` to give just the `orders` upstream a 5-day lookback
 while every other upstream keeps the model's own default.
+
+Every model in the plan (JSON and `--pretty`) carries a `layer`: its longest-path depth from an
+Entry Node within the selected subgraph. An Entry Node is `layer: 0`; every other model is
+`1 + max(every upstream's layer)` — a diamond dependency (two upstream paths of different
+length) still collapses to one number, the longer path's `+1`. Lets you read the DAG's tier
+structure straight off the plan without tracing `depends_on` by hand.
+
+### `--html`: an interactive visual report
+
+```bash
+zhao-dbt-plan --select tag:daily --event-time-start 2026-07-01 --event-time-end 2026-07-01 --html
+```
+
+Opt-in, like `--pretty` — never generated unless `--html` is passed, since most runs (typically
+CI, disposable) don't need it. Writes a self-contained, interactive HTML file to
+`<project-dir>/target/zhao/dbt-plan/dbt_plan_<YYYYMMDDHHMMSS>.html` (UTC, timestamped so repeat
+runs never collide and nothing needs cleaning up) — a directory distinct from wherever the JSON's
+`--output-file` goes, and it never changes the JSON's own default path or contents.
+
+Each model is a node showing its full name, computed date-range window, and layer, laid out by
+layer with its downstream connections drawn so the cascading structure is visible without reading
+JSON at all. All interactivity (search, highlighting the upstream/downstream chain on selection,
+a resizable side panel) runs client-side in plain JavaScript against an embedded JSON blob — no
+network access, no CDN reference anywhere, works fully offline. Model names are never truncated,
+regardless of length — node boxes wrap to fit the full name rather than clipping it.
 
 Run `zhao-dbt-plan --help` for the full flag reference; the plan JSON's shape is documented
 inline in `src/output.rs`.
