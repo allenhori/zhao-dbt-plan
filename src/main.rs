@@ -5,6 +5,7 @@
 mod cli;
 mod config;
 mod date;
+mod detect;
 mod git;
 mod manifest;
 mod output;
@@ -31,6 +32,12 @@ fn run(args: &cli::Cli) -> Result<(), String> {
         .project_dir
         .clone()
         .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    // The very first check: is this even a dbt project? Everything below
+    // assumes one and fails with a confusing dbt-subprocess-shaped error
+    // otherwise -- see detect.rs's module doc comment.
+    detect::ensure_dbt_project(&project_dir).map_err(|e| e.to_string())?;
+
     let config = config::Config::load_for_project(&project_dir).map_err(|e| e.to_string())?;
 
     let manifest_path = args

@@ -261,6 +261,32 @@ fn pretty_flag_renders_a_tree_to_stdout_in_addition_to_writing_json() {
     );
 }
 
+/// Pointed at a directory with no `dbt_project.yml` at all, `--project-dir`
+/// fails immediately with a clear, actionable error -- not a confusing
+/// `dbt`-subprocess-shaped failure several steps later. Doesn't need a
+/// real `dbt` install at all (the check happens before anything shells
+/// out), so this test always runs, unlike the others in this file.
+#[test]
+fn a_project_dir_with_no_dbt_project_yml_fails_fast_with_a_clear_error() {
+    let empty_dir = tempfile::tempdir().expect("should create tempdir");
+
+    let assert = Command::cargo_bin("zhao-dbt-plan")
+        .expect("binary should build")
+        .arg("--project-dir")
+        .arg(empty_dir.path())
+        .arg("--select")
+        .arg("tag:whatever")
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("dbt_project.yml"), "{stderr}");
+    assert!(
+        stderr.contains(&empty_dir.path().display().to_string()),
+        "{stderr}"
+    );
+}
+
 /// dbt-core and dbt Fusion must produce identical plans against the
 /// identical fixture project. Runs automatically when
 /// `ZHAO_DBT_PLAN_TEST_FUSION_COMMAND` names a real dbt Fusion install
