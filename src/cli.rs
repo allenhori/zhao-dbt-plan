@@ -62,16 +62,18 @@ pub struct Cli {
 
     /// Executable/prefix used for every internal `dbt` invocation this
     /// addon makes (`dbt parse` for manifest freshness, `dbt ls` for
-    /// selection). Precedence: this flag, then `zhao.yml`'s
-    /// `dbt-plan.dbt-command`, then `"dbt"`.
+    /// selection). Precedence: this flag, then `zhao.yml`'s top-level
+    /// `dbt-command` (shared with `zhao-cli`'s own dbt-invocation config),
+    /// then `"dbt"`.
     #[arg(long = "dbt-command")]
     pub dbt_command: Option<String>,
 
     /// Extra arguments (shell-word-style, e.g. `"--target ci"`) appended
     /// to every internal `dbt` invocation this addon makes. Precedence:
-    /// this flag, then `zhao.yml`'s `dbt-plan.dbt-args`, then none.
-    /// `allow_hyphen_values`: the value itself starts with `--` (e.g.
-    /// `--target`), which clap would otherwise mistake for a new flag.
+    /// this flag, then `zhao.yml`'s top-level `dbt-args` (shared with
+    /// `zhao-cli`), then none. `allow_hyphen_values`: the value itself
+    /// starts with `--` (e.g. `--target`), which clap would otherwise
+    /// mistake for a new flag.
     #[arg(long = "dbt-args", allow_hyphen_values = true)]
     pub dbt_args: Option<String>,
 

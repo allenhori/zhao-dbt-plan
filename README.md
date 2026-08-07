@@ -149,8 +149,31 @@ a resizable side panel) runs client-side in plain JavaScript against an embedded
 network access, no CDN reference anywhere, works fully offline. Model names are never truncated,
 regardless of length — node boxes wrap to fit the full name rather than clipping it.
 
-Run `zhao-dbt-plan --help` for the full flag reference; the plan JSON's shape is documented
-inline in `src/output.rs`.
+## Flag reference
+
+| Flag | Default | What it does |
+|---|---|---|
+| `-s, --select <selector>` | — | Required. dbt's own selector syntax, forwarded verbatim to `dbt ls --select` (tags, paths, `+` graph operators, intersections — anything `dbt build --select` accepts). |
+| `--exclude <selector>` | — | Forwarded verbatim to `dbt ls --exclude`, same syntax as `--select`. |
+| `--event-time-start <date>` | yesterday | Explicit Anchor window start (`YYYY-MM-DD`). Must be passed together with `--event-time-end`, or not at all. |
+| `--event-time-end <date>` | yesterday | Explicit Anchor window end. Mandatory (both this and `--event-time-start`) whenever `--anchor` is used — see below. |
+| `--anchor <model>` | — | Pins the literal window to this one named model instead of every Entry Node — see [`--anchor`](#--anchor-model-pinning-the-literal-window-to-a-specific-model) above. |
+| `--project-dir <dir>` | `.` | The dbt project directory. Everything else (manifest path, `dbt ls`/`dbt parse` invocations) is resolved relative to this. |
+| `--manifest <path>` | `<project-dir>/target/manifest.json` | Path to the compiled manifest to read. |
+| `-o, --output-file <path>` | `<project-dir>/target/zhao/dbt_plan.json` | Destination for the plan JSON. |
+| `--pretty` | — | Also renders an ASCII tree of the plan to the terminal (`[layer N] name [start .. end]`), in addition to writing the JSON. |
+| `--html` | — | Also writes the self-contained, interactive HTML report — see [`--html`](#--html-an-interactive-visual-report) above. |
+| `--dbt-command <cmd>` | `dbt` | Executable/prefix for every internal `dbt` call this addon makes (`dbt parse` for manifest freshness, `dbt ls` for selection). Shell-word-split, so a multi-word wrapper (`"uv run dbt"`, `"dw some-flag"`) works as a genuine prefix. Overrides `zhao.yml`'s top-level `dbt-command` (shared with `zhao-cli`) when given. |
+| `--dbt-args "<string>"` | — | Extra arguments appended to every internal `dbt` call, e.g. `"--target ci"`. Overrides `zhao.yml`'s top-level `dbt-args` when given. |
+| `--against <ref>` | `master` | The ref `state:`-method selectors are compared against, when `--state` isn't given explicitly. Overrides `zhao.yml`'s top-level `against` (shared with `zhao-cli`'s own git-native Baseline resolution) when given. |
+| `--state <dir>` | — | An explicit, already-compiled manifest directory to pass as `dbt ls --state`, for a `state:`-method selector — resolves git-natively (merge-base against `--against`, compiled in a temporary worktree) when omitted and the selector actually needs one. Wins outright over `--against` if given. |
+| `-h, --help` | — | Full flag reference, same as this table, printed from the binary itself. |
+| `-V, --version` | — | Print version. |
+
+`zhao.yml`'s `dbt-plan:` block also has its own, addon-specific `max-window-expansion-days` key
+(default `90`, warn-only — the ceiling `mb_orders_wide_lookback` trips in the example above),
+with no CLI flag equivalent; it has no equivalent concept in `zhao-cli` to share a top-level key
+with. The plan JSON's shape is documented inline in `src/output.rs`.
 
 ## Compatibility
 
