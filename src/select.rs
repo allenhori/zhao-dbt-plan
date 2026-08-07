@@ -164,7 +164,6 @@ pub fn resolve(
 mod tests {
     use super::*;
     use crate::manifest::Node;
-    use std::os::unix::fs::PermissionsExt;
 
     fn model(id: &str, name: &str) -> Node {
         Node {
@@ -187,49 +186,40 @@ mod tests {
         }
     }
 
-    /// A stub standing in for real `dbt` on `PATH` -- a tiny shell
-    /// script, so this test doesn't need a real dbt project or
-    /// installation. The real behavior is proven end to end by
-    /// `tests/end_to_end.rs` against a real, self-contained dbt project
-    /// and real `dbt`/`dbt-fusion` installs instead.
-    fn stub_dbt_command(dir: &Path, stdout: &str) -> std::path::PathBuf {
-        use std::io::Write as _;
-
-        let script_path = dir.join("stub_dbt.sh");
-        // Explicit File + write_all + sync_all + drop (closing the fd),
-        // rather than std::fs::write -- on Linux, execve fails with
-        // ETXTBSY ("Text file busy") if the file is still considered
-        // open-for-writing by the kernel at exec time; sync_all before
-        // the handle drops ensures the write is fully flushed and closed
-        // before this function returns, closing the same race
-        // ETXTBSY-on-Linux-CI bug this project has hit before (see
-        // zhao-cli's git history for the NamedTempFile variant of it).
-        let mut file = std::fs::File::create(&script_path).expect("should create stub script");
-        file.write_all(format!("#!/bin/sh\ncat <<'EOF'\n{stdout}EOF\n").as_bytes())
-            .expect("should write stub script");
-        file.sync_all().expect("should flush stub script");
-        drop(file);
-
-        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-            .expect("should set executable permission");
-        script_path
+    /// A stub standing in for real `dbt` on `PATH`, as a `--dbt-command`
+    /// value -- `sh -c '<inline heredoc>'`, invoking the pre-existing
+    /// `sh` binary rather than writing and exec'ing a fresh script file.
+    ///
+    /// The fresh-file approach (write a script, chmod +x, exec it) was
+    /// tried first and was flaky on Linux CI specifically: `execve`
+    /// intermittently failed with `ETXTBSY` ("Text file busy") even
+    /// after an explicit `File` + `write_all` + `sync_all` + `drop`
+    /// (fully closing the fd before returning) -- the kernel's
+    /// "still open for writing" bookkeeping apparently doesn't always
+    /// settle synchronously with a close, at least on the containerized
+    /// filesystem GitHub Actions' Linux runners use, under the
+    /// concurrent load of a parallel test run. Never invoking an exec
+    /// against a just-written file at all sidesteps the race entirely --
+    /// `sh` itself is a long-existing binary, never freshly written.
+    /// `dbt ls`'s extra positional args (from `select.rs`'s own
+    /// `.arg("ls")...`) land on `sh -c`'s script as `$1`, `$2`, ...,
+    /// which the heredoc-only script below never references, so they're
+    /// silently ignored -- exactly like a real stub would ignore them.
+    /// The real behavior (including argument handling) is proven end to
+    /// end by `tests/end_to_end.rs` against a real, self-contained dbt
+    /// project and real `dbt`/`dbt-fusion` installs instead.
+    fn stub_dbt_command(stdout: &str) -> String {
+        format!("sh -c 'cat <<EOF\n{stdout}EOF\n'")
     }
 
     #[test]
     fn maps_dbt_ls_output_names_back_to_unique_ids() {
         let manifest = manifest_of(vec![model("model.p.a", "a"), model("model.p.b", "b")]);
         let dir = tempfile::tempdir().expect("should create tempdir");
-        let stub = stub_dbt_command(dir.path(), "a\nb\n");
+        let stub = stub_dbt_command("a\nb\n");
 
-        let selected = resolve(
-            dir.path(),
-            &manifest,
-            &stub.display().to_string(),
-            &[],
-            "tag:whatever",
-            None,
-        )
-        .expect("should resolve");
+        let selected = resolve(dir.path(), &manifest, &stub, &[], "tag:whatever", None)
+            .expect("should resolve");
 
         assert_eq!(
             selected,
@@ -241,17 +231,9 @@ mod tests {
     fn a_name_dbt_ls_returns_but_the_manifest_does_not_know_is_a_clear_error() {
         let manifest = manifest_of(vec![model("model.p.a", "a")]);
         let dir = tempfile::tempdir().expect("should create tempdir");
-        let stub = stub_dbt_command(dir.path(), "nonexistent_model\n");
+        let stub = stub_dbt_command("nonexistent_model\n");
 
-        let err = resolve(
-            dir.path(),
-            &manifest,
-            &stub.display().to_string(),
-            &[],
-            "tag:whatever",
-            None,
-        )
-        .unwrap_err();
+        let err = resolve(dir.path(), &manifest, &stub, &[], "tag:whatever", None).unwrap_err();
         assert!(
             matches!(err, SelectError::UnknownModel { name, .. } if name == "nonexistent_model")
         );
@@ -261,17 +243,10 @@ mod tests {
     fn blank_lines_in_dbt_ls_output_are_ignored() {
         let manifest = manifest_of(vec![model("model.p.a", "a")]);
         let dir = tempfile::tempdir().expect("should create tempdir");
-        let stub = stub_dbt_command(dir.path(), "a\n\n\n");
+        let stub = stub_dbt_command("a\n\n\n");
 
-        let selected = resolve(
-            dir.path(),
-            &manifest,
-            &stub.display().to_string(),
-            &[],
-            "tag:whatever",
-            None,
-        )
-        .expect("should resolve");
+        let selected = resolve(dir.path(), &manifest, &stub, &[], "tag:whatever", None)
+            .expect("should resolve");
         assert_eq!(selected, HashSet::from(["model.p.a".to_string()]));
     }
 
