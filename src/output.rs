@@ -34,6 +34,11 @@ struct PlanDocument {
 struct MetadataDocument {
     generated_at: String,
     anchor_selection: String,
+    /// The bare name of the model `--anchor` named, if it was given --
+    /// `None` when the plan was built without `--anchor` (every Entry
+    /// Node got `anchor_window` instead, per the usual rule).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    anchor_model: Option<String>,
     anchor_window: AnchorWindowDocument,
     manifest_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,6 +53,13 @@ struct AnchorWindowDocument {
     event_time_start: String,
     event_time_end: String,
     source: &'static str,
+    /// The same human-readable note surfaced on stderr and (with
+    /// `--html`) the report's header banner -- present only when
+    /// `source` is `"default_yesterday"`, so the JSON's `source` tag is
+    /// never the *only* place this assumption is recorded. `None` for
+    /// `"explicit"` (nothing to explain).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -76,6 +88,7 @@ pub fn render(built_plan: &Plan, metadata: &Metadata) -> String {
         metadata: MetadataDocument {
             generated_at: now_rfc3339(),
             anchor_selection: metadata.anchor_selection.clone(),
+            anchor_model: built_plan.anchor_model.clone(),
             anchor_window: AnchorWindowDocument {
                 event_time_start: built_plan.anchor_window.start.to_string(),
                 event_time_end: built_plan.anchor_window.end.to_string(),
@@ -83,6 +96,7 @@ pub fn render(built_plan: &Plan, metadata: &Metadata) -> String {
                     AnchorSource::Explicit => "explicit",
                     AnchorSource::DefaultYesterday => "default_yesterday",
                 },
+                note: built_plan.default_yesterday_note(),
             },
             manifest_path: metadata.manifest_path.clone(),
             manifest_generated_at: metadata.manifest_generated_at.clone(),
@@ -205,6 +219,7 @@ mod tests {
         Plan {
             anchor_window: Window { start: d, end: d },
             anchor_source: AnchorSource::Explicit,
+            anchor_model: None,
             models: vec![
                 PlannedModel {
                     name: "a".to_string(),
@@ -286,6 +301,93 @@ mod tests {
         );
         assert!(!rendered.contains("dbt build"));
         assert!(!rendered.contains("dbt run"));
+    }
+
+    #[test]
+    fn anchor_model_is_recorded_when_given_and_absent_otherwise() {
+        let mut built = sample_plan();
+        built.anchor_model = Some("b".to_string());
+        let rendered = render(
+            &built,
+            &Metadata {
+                anchor_selection: "+b+".to_string(),
+                manifest_path: "target/manifest.json".to_string(),
+                manifest_generated_at: None,
+                dbt_command: "dbt".to_string(),
+                max_window_expansion_days: 90,
+            },
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+        assert_eq!(parsed["metadata"]["anchor_model"], "b");
+
+        // Without --anchor, the field must be entirely absent, not `null`.
+        let without_anchor = render(
+            &sample_plan(),
+            &Metadata {
+                anchor_selection: "tag:daily".to_string(),
+                manifest_path: "target/manifest.json".to_string(),
+                manifest_generated_at: None,
+                dbt_command: "dbt".to_string(),
+                max_window_expansion_days: 90,
+            },
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&without_anchor).expect("valid JSON");
+        assert!(
+            parsed["metadata"]
+                .as_object()
+                .unwrap()
+                .get("anchor_model")
+                .is_none(),
+            "anchor_model should be omitted entirely, not null, when --anchor wasn't given: {parsed}"
+        );
+    }
+
+    #[test]
+    fn the_default_yesterday_note_appears_in_json_only_on_the_default_yesterday_path() {
+        let mut defaulted = sample_plan();
+        defaulted.anchor_source = AnchorSource::DefaultYesterday;
+        let rendered = render(
+            &defaulted,
+            &Metadata {
+                anchor_selection: "tag:daily".to_string(),
+                manifest_path: "target/manifest.json".to_string(),
+                manifest_generated_at: None,
+                dbt_command: "dbt".to_string(),
+                max_window_expansion_days: 90,
+            },
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+        assert_eq!(
+            parsed["metadata"]["anchor_window"]["source"],
+            "default_yesterday"
+        );
+        let note = parsed["metadata"]["anchor_window"]["note"]
+            .as_str()
+            .expect("note should be present for the default-yesterday path");
+        assert!(note.contains("yesterday"), "{note}");
+
+        // The explicit path (sample_plan()'s default) must have no note
+        // at all -- absent, not null.
+        let explicit = sample_plan();
+        let rendered = render(
+            &explicit,
+            &Metadata {
+                anchor_selection: "tag:daily".to_string(),
+                manifest_path: "target/manifest.json".to_string(),
+                manifest_generated_at: None,
+                dbt_command: "dbt".to_string(),
+                max_window_expansion_days: 90,
+            },
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+        assert!(
+            parsed["metadata"]["anchor_window"]
+                .as_object()
+                .unwrap()
+                .get("note")
+                .is_none(),
+            "the explicit path must carry no note at all: {parsed}"
+        );
     }
 
     #[test]
