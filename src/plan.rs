@@ -51,12 +51,17 @@ pub struct PlannedModel {
     pub name: String,
     /// Its resolved window.
     pub window: Window,
-    /// Its own declared default `lookback_days` (0 if it has no
+    /// Its own declared default `lookback` amount (0 if it has no
     /// `config.meta.zhao` block at all -- see §6's "no global default"
-    /// decision).
-    pub lookback_days: i64,
-    /// Its own declared default `lookahead_days`, same zero-default rule.
-    pub lookahead_days: i64,
+    /// decision), and the unit it's measured in.
+    pub lookback: i64,
+    /// The unit `lookback` is measured in.
+    pub lookback_unit: crate::date::TimeUnit,
+    /// Its own declared default `lookahead` amount, same zero-default
+    /// rule, and the unit it's measured in.
+    pub lookahead: i64,
+    /// The unit `lookahead` is measured in.
+    pub lookahead_unit: crate::date::TimeUnit,
     /// Direct upstream dependencies *within the plan* (not the whole
     /// project graph), by bare name -- see §8.
     pub depends_on: Vec<String>,
@@ -169,16 +174,20 @@ pub fn build(
                         .lookback_overrides
                         .get(upstream_name)
                         .copied()
-                        .unwrap_or(zhao_meta.lookback_days);
+                        .unwrap_or(zhao_meta.lookback);
                     let lookahead = zhao_meta
                         .lookahead_overrides
                         .get(upstream_name)
                         .copied()
-                        .unwrap_or(zhao_meta.lookahead_days);
+                        .unwrap_or(zhao_meta.lookahead);
                     let upstream_window = windows[upstream_id];
                     Window {
-                        start: upstream_window.start.minus_days(lookback),
-                        end: upstream_window.end.plus_days(lookahead),
+                        start: upstream_window
+                            .start
+                            .minus(lookback, zhao_meta.lookback_unit),
+                        end: upstream_window
+                            .end
+                            .plus(lookahead, zhao_meta.lookahead_unit),
                     }
                 })
                 .reduce(Window::union)
@@ -207,9 +216,9 @@ pub fn build(
         if node.zhao_meta.is_some() && node.event_time.is_none() {
             warnings.push(Warning {
                 model: node.name.clone(),
-                message: "declares config.meta.zhao (lookback_days/lookahead_days) but has no \
-                          event_time configured -- this isn't a microbatch model in dbt's own \
-                          terms, so this config has no real effect"
+                message: "declares config.meta.zhao (lookback/lookahead) but has no event_time \
+                          configured -- this isn't a microbatch model in dbt's own terms, so \
+                          this config has no real effect"
                     .to_string(),
             });
         }
@@ -218,8 +227,10 @@ pub fn build(
         models.push(PlannedModel {
             name: node.name.clone(),
             window,
-            lookback_days: zhao_meta.lookback_days,
-            lookahead_days: zhao_meta.lookahead_days,
+            lookback: zhao_meta.lookback,
+            lookback_unit: zhao_meta.lookback_unit,
+            lookahead: zhao_meta.lookahead,
+            lookahead_unit: zhao_meta.lookahead_unit,
             depends_on: deps
                 .iter()
                 .map(|dep_id| manifest.nodes[*dep_id].name.clone())
@@ -314,8 +325,10 @@ mod tests {
 
     fn meta(lookback: i64, lookahead: i64) -> ZhaoMeta {
         ZhaoMeta {
-            lookback_days: lookback,
-            lookahead_days: lookahead,
+            lookback,
+            lookback_unit: crate::date::TimeUnit::Day,
+            lookahead,
+            lookahead_unit: crate::date::TimeUnit::Day,
             lookback_overrides: HashMap::new(),
             lookahead_overrides: HashMap::new(),
         }

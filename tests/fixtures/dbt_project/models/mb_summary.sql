@@ -7,7 +7,7 @@
         begin='2026-08-01',
         unique_key='order_id',
         tags=['microbatch_demo'],
-        meta={'zhao': {'lookback_days': 1, 'lookahead_days': 1}}
+        meta={'zhao': {'lookback': 1, 'lookahead': 1}}
     )
 }}
 

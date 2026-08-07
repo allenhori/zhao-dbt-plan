@@ -60,12 +60,20 @@ A model opts into cascading expansion via `config.meta.zhao` in its own `{{ conf
     incremental_strategy='microbatch',
     event_time='order_date',
     batch_size='day',
-    meta={'zhao': {'lookback_days': 3, 'lookahead_days': 4}}
+    meta={'zhao': {'lookback': 3, 'lookahead': 4}}
 ) }}
 ```
 
+`lookback`/`lookahead` default to days; set `lookback_unit`/`lookahead_unit` (`day`, `week`,
+`month`, or `year`) if you need a different one — e.g. `{'lookback': 3, 'lookback_unit':
+'month'}` for "3 calendar months back." Each direction has its own independent unit.
+
 No `config.meta.zhao` block at all means zero expansion for that model — deliberately, so a
 forgotten declaration is visibly a no-op in the plan, not a silently inherited default.
+
+Per-upstream overrides (different lookback depending on *which* upstream) via
+`lookback_overrides`/`lookahead_overrides`, keyed by the upstream model's bare name — see the
+full spec for the exact shape.
 
 Full flag reference, plan JSON schema, and the config-scope/edge-override rules:
 [docs/research/zhao-dbt-plan-spec.md](https://github.com/allenhori/zhao/blob/master/docs/research/zhao-dbt-plan-spec.md).
@@ -79,14 +87,17 @@ verified to produce byte-identical plans from the identical project (see
 
 ## Building a zhao-cli Addon
 
-`zhao-dbt-plan` is zhao's first Addon — a standalone binary, discovered by `zhao-cli` on `PATH`
-by naming convention (`zhao dbt-plan` finds and invokes `zhao-dbt-plan`), communicating purely
-through files (reads `target/zhao/full_lineage.json`-style artifacts and its own compiled
-manifest; writes its own plan to a fixed path). No technical dependency on `zhao-cli` either —
-this binary runs standalone, same as above, with zero `zhao-cli` install required. See
+`zhao-dbt-plan` is zhao's first Addon — a standalone binary with no technical dependency on
+`zhao-cli` (this binary runs entirely on its own, as shown above, with zero `zhao-cli` install
+required). It's *designed* to also be discoverable as `zhao dbt-plan` once installed alongside
+`zhao-cli` on the same `PATH` (this `install.sh` installs to the same `~/.zhao/bin` directory
+`zhao-cli` uses, specifically for that), communicating purely through files. **That dispatch
+mechanism lives in `zhao-cli` itself and is still being built** (tracked as
+[allenhori/zhao#49](https://github.com/allenhori/zhao/issues/49)) — until it lands, use the
+standalone `zhao-dbt-plan` binary directly, as in every example above. See
 [ADR 0010](https://github.com/allenhori/zhao/blob/master/docs/adr/0010-addon-interface-is-subprocess-plus-file-contract.md)
-for why, and `zhao-cli`'s own `examples/hello-zhao-addon/` for a minimal reference
-implementation of the same contract, if you want to build your own.
+for the design, and `zhao-cli`'s own `examples/hello-zhao-addon/` for a minimal reference
+implementation of the same contract, if you want to build your own Addon.
 
 ## License
 

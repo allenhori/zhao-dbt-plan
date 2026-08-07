@@ -193,12 +193,23 @@ mod tests {
     /// `tests/end_to_end.rs` against a real, self-contained dbt project
     /// and real `dbt`/`dbt-fusion` installs instead.
     fn stub_dbt_command(dir: &Path, stdout: &str) -> std::path::PathBuf {
+        use std::io::Write as _;
+
         let script_path = dir.join("stub_dbt.sh");
-        std::fs::write(
-            &script_path,
-            format!("#!/bin/sh\ncat <<'EOF'\n{stdout}EOF\n"),
-        )
-        .expect("should write stub script");
+        // Explicit File + write_all + sync_all + drop (closing the fd),
+        // rather than std::fs::write -- on Linux, execve fails with
+        // ETXTBSY ("Text file busy") if the file is still considered
+        // open-for-writing by the kernel at exec time; sync_all before
+        // the handle drops ensures the write is fully flushed and closed
+        // before this function returns, closing the same race
+        // ETXTBSY-on-Linux-CI bug this project has hit before (see
+        // zhao-cli's git history for the NamedTempFile variant of it).
+        let mut file = std::fs::File::create(&script_path).expect("should create stub script");
+        file.write_all(format!("#!/bin/sh\ncat <<'EOF'\n{stdout}EOF\n").as_bytes())
+            .expect("should write stub script");
+        file.sync_all().expect("should flush stub script");
+        drop(file);
+
         std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
             .expect("should set executable permission");
         script_path

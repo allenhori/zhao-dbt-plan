@@ -10,6 +10,29 @@
 
 use std::fmt;
 
+use serde::Deserialize;
+
+/// The unit a `lookback`/`lookahead` amount in `config.meta.zhao` is
+/// measured in -- e.g. `lookback_unit: month` for a model that needs "3
+/// months back," not "3 days back." Defaults to [`TimeUnit::Day`] when
+/// omitted, so the common case (`lookback: 3`, no unit at all) needs no
+/// extra config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TimeUnit {
+    /// A calendar day.
+    #[default]
+    Day,
+    /// 7 calendar days.
+    Week,
+    /// A calendar month -- see [`Date::minus`]/[`Date::plus`] for how a
+    /// day-of-month that doesn't exist in the target month (e.g. the
+    /// 31st, one month before a 30-day month) is handled.
+    Month,
+    /// A calendar year (12 months).
+    Year,
+}
+
 /// A calendar date, stored as a day count since the Unix epoch
 /// (1970-01-01) -- the same representation
 /// [`days_from_civil`]/[`civil_from_days`] convert to/from.
@@ -68,6 +91,45 @@ impl Date {
         Date(self.0 + days)
     }
 
+    /// This date, `amount` `unit`s earlier (or later, if negative) --
+    /// the general form [`minus_days`](Self::minus_days) is a special
+    /// case of. `Week` is a fixed 7 days; `Month`/`Year` are genuine
+    /// calendar arithmetic (see [`add_months`]), not a fixed day count.
+    pub fn minus(self, amount: i64, unit: TimeUnit) -> Date {
+        match unit {
+            TimeUnit::Day => self.minus_days(amount),
+            TimeUnit::Week => self.minus_days(amount * 7),
+            TimeUnit::Month => self.add_months(-amount),
+            TimeUnit::Year => self.add_months(-amount * 12),
+        }
+    }
+
+    /// This date, `amount` `unit`s later (or earlier, if negative) --
+    /// see [`minus`](Self::minus).
+    pub fn plus(self, amount: i64, unit: TimeUnit) -> Date {
+        match unit {
+            TimeUnit::Day => self.plus_days(amount),
+            TimeUnit::Week => self.plus_days(amount * 7),
+            TimeUnit::Month => self.add_months(amount),
+            TimeUnit::Year => self.add_months(amount * 12),
+        }
+    }
+
+    /// This date, `months` calendar months later (or earlier, if
+    /// negative). If the current day-of-month doesn't exist in the
+    /// target month (e.g. adding 1 month to Jan 31, and February has no
+    /// 31st), clamps to the target month's actual last day -- the same
+    /// convention most calendar libraries use, rather than overflowing
+    /// into the following month.
+    fn add_months(self, months: i64) -> Date {
+        let (y, m, d) = civil_from_days(self.0);
+        let total_months = y * 12 + (m as i64 - 1) + months;
+        let new_y = total_months.div_euclid(12);
+        let new_m = (total_months.rem_euclid(12) + 1) as u32;
+        let new_d = d.min(days_in_month(new_y, new_m));
+        Date(days_from_civil(new_y, new_m, new_d))
+    }
+
     /// The number of days from `self` to `other`, inclusive of both ends
     /// -- e.g. the same date to itself is a 1-day span, matching how a
     /// single-day Anchor window is described throughout the spec.
@@ -122,6 +184,21 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// The number of days in proleptic-Gregorian month `m` of year `y`
+/// (leap years handled via the standard divisible-by-4-except-100-
+/// unless-400 rule).
+fn days_in_month(y: i64, m: u32) -> u32 {
+    match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+            if leap { 29 } else { 28 }
+        }
+        _ => unreachable!("month is always 1..=12, produced by civil_from_days"),
+    }
 }
 
 #[cfg(test)]
@@ -181,5 +258,45 @@ mod tests {
     fn single_day_span_is_one_not_zero() {
         let d = Date::parse("2026-07-01").expect("should parse");
         assert_eq!(d.span_days_to(d), 1);
+    }
+
+    #[test]
+    fn week_unit_is_seven_days() {
+        let d = Date::parse("2026-07-01").expect("should parse");
+        assert_eq!(d.plus(2, TimeUnit::Week).to_string(), "2026-07-15");
+        assert_eq!(d.minus(2, TimeUnit::Week).to_string(), "2026-06-17");
+    }
+
+    #[test]
+    fn month_unit_crosses_a_year_boundary() {
+        let d = Date::parse("2026-01-15").expect("should parse");
+        assert_eq!(d.minus(2, TimeUnit::Month).to_string(), "2025-11-15");
+        assert_eq!(d.plus(2, TimeUnit::Month).to_string(), "2026-03-15");
+    }
+
+    #[test]
+    fn month_unit_clamps_a_day_that_does_not_exist_in_the_target_month() {
+        // Jan 31 - 1 month: February has no 31st, clamp to the 28th
+        // (2026 isn't a leap year).
+        let d = Date::parse("2026-01-31").expect("should parse");
+        assert_eq!(d.minus(1, TimeUnit::Month).to_string(), "2025-12-31");
+        assert_eq!(d.plus(1, TimeUnit::Month).to_string(), "2026-02-28");
+    }
+
+    #[test]
+    fn month_unit_clamps_correctly_on_a_leap_year() {
+        let d = Date::parse("2024-01-31").expect("should parse");
+        assert_eq!(d.plus(1, TimeUnit::Month).to_string(), "2024-02-29");
+    }
+
+    #[test]
+    fn year_unit_is_twelve_months_and_respects_leap_day_clamping() {
+        let d = Date::parse("2024-02-29").expect("should parse");
+        assert_eq!(d.plus(1, TimeUnit::Year).to_string(), "2025-02-28");
+    }
+
+    #[test]
+    fn default_unit_is_day() {
+        assert_eq!(TimeUnit::default(), TimeUnit::Day);
     }
 }

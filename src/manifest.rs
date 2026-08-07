@@ -13,6 +13,8 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::date::TimeUnit;
+
 /// Everything that can go wrong reading a manifest.
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
@@ -42,26 +44,39 @@ pub enum ManifestError {
 /// call, the same way `config.materialized`/`config.event_time` are.
 ///
 /// Distinct from dbt's own native `config.lookback` (a different,
-/// narrower mechanism for late-arriving *source* data -- see the spec's
-/// §9 "Sources" section for why this addon doesn't touch that field at
-/// all).
+/// orthogonal mechanism handling a model's own late-arriving data within
+/// normal operation -- see the spec's §9 "Sources" section for how the
+/// two relate; they don't conflict, since they don't share a field).
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 pub struct ZhaoMeta {
-    /// Default lookback (in days) applied against every selected
-    /// upstream, unless overridden per-upstream in `lookback_overrides`.
+    /// Default lookback amount applied against every selected upstream,
+    /// unless overridden per-upstream in `lookback_overrides`. Measured
+    /// in `lookback_unit`.
     #[serde(default)]
-    pub lookback_days: i64,
-    /// Default lookahead (in days) applied against every selected
-    /// upstream, unless overridden per-upstream in `lookahead_overrides`.
+    pub lookback: i64,
+    /// The unit `lookback` (and every entry in `lookback_overrides`) is
+    /// measured in -- e.g. `month` for "3 months back," not "3 days
+    /// back." Defaults to [`TimeUnit::Day`] when omitted.
     #[serde(default)]
-    pub lookahead_days: i64,
+    pub lookback_unit: TimeUnit,
+    /// Default lookahead amount applied against every selected upstream,
+    /// unless overridden per-upstream in `lookahead_overrides`. Measured
+    /// in `lookahead_unit`.
+    #[serde(default)]
+    pub lookahead: i64,
+    /// The unit `lookahead` (and every entry in `lookahead_overrides`) is
+    /// measured in. Defaults to [`TimeUnit::Day`] when omitted.
+    #[serde(default)]
+    pub lookahead_unit: TimeUnit,
     /// Per-upstream lookback override, keyed by the upstream model's bare
     /// name (not its full `unique_id`) -- e.g. `{"model_a": 7}` for "7
-    /// days back from Model A specifically, regardless of the default."
+    /// [`lookback_unit`s](Self::lookback_unit) back from Model A
+    /// specifically, regardless of the default." Shares `lookback_unit`
+    /// with the default -- there's no separate per-override unit.
     #[serde(default)]
     pub lookback_overrides: HashMap<String, i64>,
     /// Per-upstream lookahead override, same keying as
-    /// `lookback_overrides`.
+    /// `lookback_overrides`, sharing `lookahead_unit`.
     #[serde(default)]
     pub lookahead_overrides: HashMap<String, i64>,
 }
@@ -248,7 +263,7 @@ mod tests {
                         "config": {
                             "tags": ["daily"],
                             "event_time": "order_date",
-                            "meta": {"zhao": {"lookback_days": 3, "lookahead_days": 4}}
+                            "meta": {"zhao": {"lookback": 3, "lookahead": 4}}
                         }
                     }
                 },
@@ -263,11 +278,40 @@ mod tests {
         assert_eq!(
             node.zhao_meta,
             Some(ZhaoMeta {
-                lookback_days: 3,
-                lookahead_days: 4,
+                lookback: 3,
+                lookback_unit: crate::date::TimeUnit::Day,
+                lookahead: 4,
+                lookahead_unit: crate::date::TimeUnit::Day,
                 lookback_overrides: HashMap::new(),
                 lookahead_overrides: HashMap::new(),
             })
+        );
+    }
+
+    #[test]
+    fn an_explicit_non_day_unit_parses_and_a_missing_unit_defaults_to_day() {
+        let file = write_manifest(
+            r#"{
+                "nodes": {
+                    "model.p.b": {
+                        "resource_type": "model",
+                        "name": "b",
+                        "original_file_path": "models/b.sql",
+                        "config": {
+                            "meta": {"zhao": {"lookback": 3, "lookback_unit": "month", "lookahead": 4}}
+                        }
+                    }
+                },
+                "sources": {}
+            }"#,
+        );
+        let manifest = Manifest::load(file.path()).expect("should parse");
+        let zhao_meta = manifest.nodes["model.p.b"].zhao_meta.clone().unwrap();
+        assert_eq!(zhao_meta.lookback_unit, crate::date::TimeUnit::Month);
+        assert_eq!(
+            zhao_meta.lookahead_unit,
+            crate::date::TimeUnit::Day,
+            "lookahead_unit wasn't specified, should default to Day"
         );
     }
 
