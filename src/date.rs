@@ -94,7 +94,8 @@ impl Date {
     /// This date, `amount` `unit`s earlier (or later, if negative) --
     /// the general form [`minus_days`](Self::minus_days) is a special
     /// case of. `Week` is a fixed 7 days; `Month`/`Year` are genuine
-    /// calendar arithmetic (see [`add_months`]), not a fixed day count.
+    /// calendar arithmetic (see [`add_months`](Self::add_months)), not a
+    /// fixed day count.
     pub fn minus(self, amount: i64, unit: TimeUnit) -> Date {
         match unit {
             TimeUnit::Day => self.minus_days(amount),
