@@ -66,4 +66,20 @@ pub struct Cli {
     /// `--target`), which clap would otherwise mistake for a new flag.
     #[arg(long = "dbt-args", allow_hyphen_values = true)]
     pub dbt_args: Option<String>,
+
+    /// The ref `state:`-method selectors are compared against, when
+    /// `--state` isn't given explicitly. Precedence: this flag, then
+    /// `zhao.yml`'s top-level `against` (shared with `zhao-cli`'s own
+    /// git-native Baseline resolution), then `"master"`.
+    #[arg(long = "against")]
+    pub against: Option<String>,
+
+    /// An explicit, already-compiled manifest directory to pass as `dbt
+    /// ls --state`, for a `state:`-method selector. Wins outright over
+    /// `--against` if given -- no git involved at all. Mutually
+    /// exclusive with `--against` only in the sense that this, if
+    /// present, always takes priority; both may technically be passed,
+    /// but `--against` is then simply unused.
+    #[arg(long = "state")]
+    pub state: Option<PathBuf>,
 }

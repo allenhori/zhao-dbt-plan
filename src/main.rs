@@ -5,11 +5,13 @@
 mod cli;
 mod config;
 mod date;
+mod git;
 mod manifest;
 mod output;
 mod plan;
 mod refresh;
 mod select;
+mod state;
 
 use std::process::ExitCode;
 
@@ -61,6 +63,26 @@ fn run(args: &cli::Cli) -> Result<(), String> {
 
     let manifest = manifest::Manifest::load(&manifest_path).map_err(|e| e.to_string())?;
 
+    // `state:`-method resolution (§ "State comparison"): explicit
+    // --state wins outright; else a "state:" selector git-natively
+    // resolves a merge-base baseline against --against/config/"master";
+    // else None (no state: method used at all, nothing to do here).
+    let against = args
+        .against
+        .clone()
+        .or_else(|| config.against.clone())
+        .unwrap_or_else(|| "master".to_string());
+    let state_source = state::resolve(
+        &project_dir,
+        &args.select,
+        args.exclude.as_deref(),
+        args.state.as_deref(),
+        &against,
+        &dbt_command,
+        &dbt_args,
+    )
+    .map_err(|e| e.to_string())?;
+
     // --select/--exclude resolution (passthrough to `dbt ls` -- see
     // select.rs's module doc comment for why this isn't reimplemented).
     let selected = select::resolve(
@@ -70,6 +92,7 @@ fn run(args: &cli::Cli) -> Result<(), String> {
         &dbt_args,
         &args.select,
         args.exclude.as_deref(),
+        state_source.as_ref().map(state::StateSource::manifest_dir),
     )
     .map_err(|e| e.to_string())?;
 
