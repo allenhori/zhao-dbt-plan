@@ -36,6 +36,5 @@ additionally run the cross-engine compatibility check.
 ## Scope
 
 This addon is deliberately **plan-only, permanently** — it never executes `dbt build`/`dbt
-run`, and never will (see the spec's §7 for why). PRs adding execution behavior won't be
-accepted; open an issue on [allenhori/zhao](https://github.com/allenhori/zhao) to discuss scope
-questions first, before investing time in a larger change.
+run`, and never will. PRs adding execution behavior won't be accepted; open an issue on this
+repo to discuss scope questions first, before investing time in a larger change.

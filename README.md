@@ -23,13 +23,11 @@ If Model A aggregates a 7-day trailing window and Model B reads Model A over a f
 `[-3, +4]` window, a backfill to Model A on day *T* silently corrupts Model B's outputs from
 *T-4* through *T+3* — and native dbt only ever re-triggers Model B for day *T* itself. Manually
 widening the whole selection's window instead wastes compute recomputing everything that wasn't
-actually touched. `zhao-dbt-plan` computes the real, minimal per-model window instead — see
-[docs/research/zhao-dbt-plan-spec.md](https://github.com/allenhori/zhao/blob/master/docs/research/zhao-dbt-plan-spec.md)
-in the `zhao` planning repo for the full spec.
+actually touched. `zhao-dbt-plan` computes the real, minimal per-model window instead.
 
-**It never executes anything.** Not `dbt build`, not `dbt run` — plan-only, permanently (see
-the spec's §7 for why). You decide how to actually run the plan: raw dbt, Dagster, Airflow, a
-Databricks Asset Bundle, whatever you already use.
+**It never executes anything.** Not `dbt build`, not `dbt run` — plan-only, permanently. You
+decide how to actually run the plan: raw dbt, Dagster, Airflow, a Databricks Asset Bundle,
+whatever you already use.
 
 ## Install
 
@@ -72,11 +70,12 @@ No `config.meta.zhao` block at all means zero expansion for that model — delib
 forgotten declaration is visibly a no-op in the plan, not a silently inherited default.
 
 Per-upstream overrides (different lookback depending on *which* upstream) via
-`lookback_overrides`/`lookahead_overrides`, keyed by the upstream model's bare name — see the
-full spec for the exact shape.
+`lookback_overrides`/`lookahead_overrides`, keyed by the upstream model's bare name, e.g.
+`{'lookback_overrides': {'orders': 5}}` to give just the `orders` upstream a 5-day lookback
+while every other upstream keeps the model's own default.
 
-Full flag reference, plan JSON schema, and the config-scope/edge-override rules:
-[docs/research/zhao-dbt-plan-spec.md](https://github.com/allenhori/zhao/blob/master/docs/research/zhao-dbt-plan-spec.md).
+Run `zhao-dbt-plan --help` for the full flag reference; the plan JSON's shape is documented
+inline in `src/output.rs`.
 
 ## Compatibility
 
@@ -94,10 +93,11 @@ same `PATH` (this `install.sh` installs to the same `~/.zhao/bin` directory `zha
 specifically for that) — `zhao-cli` finds any `zhao-<name>` binary on `PATH` and dispatches to it,
 forwarding all arguments and the exit code, communicating purely through files. So
 `zhao dbt-plan --select ...` and `zhao-dbt-plan --select ...` (standalone, as in every example
-above) are equivalent once both are installed. See
-[ADR 0010](https://github.com/allenhori/zhao/blob/master/docs/adr/0010-addon-interface-is-subprocess-plus-file-contract.md)
-for the design, and `zhao-cli`'s own `examples/hello-zhao-addon/` for a minimal reference
-implementation of the same contract, if you want to build your own Addon.
+above) are equivalent once both are installed. The whole contract is deliberately just a
+subprocess plus files — no shared library, no compiled-in knowledge on `zhao-cli`'s side of
+any specific Addon, discovery purely by the `zhao-<name>` naming convention on `PATH`. See
+`zhao-cli`'s own `examples/hello-zhao-addon/` for a minimal reference implementation of the
+same contract, if you want to build your own Addon.
 
 ## License
 
