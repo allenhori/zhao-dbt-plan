@@ -49,7 +49,7 @@ pub struct Config {
     /// shared with `zhao-cli`. Callers default this to `"dbt"` when
     /// `None`. Shell-word-split by the caller (see `select.rs`/
     /// `state.rs`), so a multi-word value (`"uv run dbt"`, a custom
-    /// wrapper like `"dw some-flag"`) works as a genuine prefix.
+    /// wrapper like `"myshell custom-flag"`) works as a genuine prefix.
     pub dbt_command: Option<String>,
     /// The top-level `dbt-args` key, if set anywhere in the chain --
     /// shared with `zhao-cli`.
@@ -180,12 +180,12 @@ mod tests {
         let dir = tempfile::tempdir().expect("should create tempdir");
         std::fs::write(
             dir.path().join("zhao.yml"),
-            "dbt-command: \"dw some-flag\"\n",
+            "dbt-command: \"myshell custom-flag\"\n",
         )
         .expect("should write zhao.yml");
 
         let config = Config::load_for_project(dir.path()).expect("should load");
-        assert_eq!(config.dbt_command.as_deref(), Some("dw some-flag"));
+        assert_eq!(config.dbt_command.as_deref(), Some("myshell custom-flag"));
     }
 
     #[test]
