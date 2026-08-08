@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>zhao-dbt-plan</title>
+<style>
+
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+
+.viz-root {
+  --surface-1:      #fcfcfb;
+  --surface-2:      #f9f9f7;
+  --text-primary:   #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted:     #898781;
+  --gridline:       #e1e0d9;
+  --border:         rgba(11,11,11,0.10);
+  --series-model:   #2a78d6;
+  --series-model-soft: #2a78d61a;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  .viz-root {
+    --surface-1:      #1a1a19;
+    --surface-2:      #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --border:         rgba(255,255,255,0.10);
+    --series-model:   #3987e5;
+    --series-model-soft: #3987e526;
+    color-scheme: dark;
+  }
+}
+
+body {
+  margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: radial-gradient(120% 100% at 0% 0%, var(--series-model-soft), transparent 55%),
+              var(--surface-2);
+}
+.viz-root { display: flex; flex-direction: column; height: 100vh; color: var(--text-primary); }
+
+/* The default-yesterday note, when the plan used it (see
+   `generate`/`Plan::default_yesterday_note`) -- a visible banner above
+   the toolbar, not buried, so a reader never has to already know to look
+   for it. Absent from the DOM entirely (not just hidden) when the plan
+   used an explicit window. */
+#default-yesterday-banner {
+  padding: 8px 20px; font-size: 12.5px; background: var(--series-model-soft);
+  color: var(--text-primary); border-bottom: 1px solid var(--border);
+}
+
+#toolbar {
+  display: flex; align-items: center; gap: 20px;
+  padding: 12px 20px; background: var(--surface-1); border-bottom: 1px solid var(--border);
+}
+.brand { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; white-space: nowrap; }
+.brand-sub { font-weight: 400; color: var(--text-muted); }
+
+.search-wrap { position: relative; flex: 1; max-width: 360px; }
+.search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+#search {
+  width: 100%; padding: 7px 12px 7px 30px; font-size: 13px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);
+  outline: none; transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+#search:focus { border-color: var(--series-model); box-shadow: 0 0 0 3px var(--series-model-soft); }
+
+.legend { display: flex; gap: 14px; margin-left: auto; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--series-model); }
+
+#main { flex: 1; display: flex; overflow: hidden; }
+#graph-scroll { flex: 1; overflow: auto; position: relative; }
+#edges { position: absolute; top: 0; left: 0; pointer-events: none; }
+#layers { display: flex; align-items: flex-start; gap: 64px; padding: 32px; position: relative; }
+.layer-col { display: flex; flex-direction: column; gap: 20px; }
+
+/* Drag handle between the graph and the panel, same convention
+   `lineage_html.rs`'s own `#panel-resize-handle` uses. */
+#panel-resize-handle {
+  width: 6px; flex-shrink: 0; cursor: col-resize; background: var(--border);
+  position: relative;
+}
+#panel-resize-handle:hover, #panel-resize-handle.resizing { background: var(--series-model); }
+
+#panel {
+  width: 340px; min-width: 240px; flex-shrink: 0; border-left: 1px solid var(--border);
+  background: var(--surface-1); padding: 20px; overflow: auto;
+}
+#panel-empty { color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+#panel-content { display: none; }
+.panel-kind { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 2px; }
+/* Hard requirement (issue #57): a model name must NEVER truncate,
+   regardless of length. No `overflow: hidden`, no `text-overflow`, no
+   `white-space: nowrap` on this element or `.node-name` below -- long
+   names wrap onto further lines instead. */
+#panel-title {
+  font-size: 16px; font-weight: 600; margin: 0 0 12px; letter-spacing: -0.01em;
+  white-space: normal; overflow-wrap: break-word; word-break: break-word;
+}
+#panel-layer, #panel-window { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 6px; }
+.panel-section-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 14px 0 6px; }
+#panel-upstream, #panel-downstream {
+  list-style: none; margin: 0; padding: 0; font-size: 12.5px;
+}
+#panel-upstream li, #panel-downstream li {
+  padding: 5px 8px; margin: 2px 0; border-radius: 6px; cursor: pointer;
+  white-space: normal; overflow-wrap: break-word; word-break: break-word;
+  transition: background 0.12s ease;
+}
+#panel-upstream li:hover, #panel-downstream li:hover { background: var(--surface-2); }
+#panel-upstream:empty::after, #panel-downstream:empty::after {
+  content: "(none — an Entry Node)"; color: var(--text-muted); font-style: italic; display: block; padding: 5px 8px;
+}
+
+.node-box {
+  cursor: pointer; width: max-content; max-width: 320px; min-width: 160px;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 14px; box-shadow: 0 1px 2px rgba(11,11,11,0.06);
+  border-left: 3px solid var(--series-model);
+  transition: opacity 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+/* The name itself: full text, always wrapped rather than clipped -- see
+   `#panel-title`'s comment above, the same rule applies here. This is
+   the element the "no ellipsis on the name" test checks specifically. */
+.node-name {
+  display: block; font-size: 12.5px; font-weight: 600; color: var(--text-primary);
+  white-space: normal; overflow-wrap: break-word; word-break: break-word;
+}
+.node-layer { display: block; font-size: 10.5px; color: var(--text-muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+.node-window { display: block; font-size: 11px; color: var(--text-secondary); margin-top: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+.node-box.selected { border-color: var(--series-model); box-shadow: 0 2px 10px var(--series-model-soft); }
+.node-box.highlighted { border-color: var(--series-model); }
+.node-box.search-match { border-color: var(--series-model); box-shadow: 0 2px 8px var(--series-model-soft); }
+.node-box.dimmed { opacity: 0.28; }
+
+.edge { stroke: var(--gridline); stroke-width: 1.5; fill: none; transition: stroke 0.15s ease, stroke-width 0.15s ease, opacity 0.15s ease; }
+.edge.highlighted { stroke: var(--series-model); stroke-width: 2.25; stroke-dasharray: 7 5; animation: flow 0.85s linear infinite; }
+.edge.dimmed { opacity: 0.18; }
+@keyframes flow { to { stroke-dashoffset: -24; } }
+@media (prefers-reduced-motion: reduce) {
+  .edge.highlighted { animation: none; }
+}
+
+</style>
+</head>
+<body>
+<div class="viz-root">
+  
+  <header id="toolbar">
+    <div class="brand">zhao <span class="brand-sub">dbt-plan</span></div>
+    <div class="search-wrap">
+      <svg class="search-icon" viewBox="0 0 16 16" width="14" height="14"><path d="M11.2 9.8h-.6l-.2-.2c.8-.9 1.3-2.1 1.3-3.4C11.7 3.3 9.4 1 6.6 1S1.5 3.3 1.5 6.1s2.3 5.1 5.1 5.1c1.3 0 2.5-.5 3.4-1.3l.2.2v.6l3.4 3.4 1-1-3.4-3.3zM6.6 9.8c-2 0-3.7-1.7-3.7-3.7S4.6 2.4 6.6 2.4s3.7 1.7 3.7 3.7-1.7 3.7-3.7 3.7z" fill="currentColor"/></svg>
+      <input id="search" type="text" placeholder="Search models…" autocomplete="off">
+    </div>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-dot"></span>model</span>
+    </div>
+  </header>
+  <div id="main">
+    <div id="graph-scroll">
+      <svg id="edges"></svg>
+      <div id="layers"></div>
+    </div>
+    <div id="panel-resize-handle" title="Drag to resize"></div>
+    <aside id="panel">
+      <div id="panel-empty">Select a model to inspect its window and lineage.</div>
+      <div id="panel-content">
+        <div class="panel-kind">model</div>
+        <h2 id="panel-title"></h2>
+        <div id="panel-layer"></div>
+        <div id="panel-window"></div>
+        <div class="panel-section-label">Upstream</div>
+        <ul id="panel-upstream"></ul>
+        <div class="panel-section-label">Downstream</div>
+        <ul id="panel-downstream"></ul>
+      </div>
+    </aside>
+  </div>
+</div>
+<script>
+window.ZHAO_DBT_PLAN_DATA = {"nodes":[{"name":"mb_daily","layer":0,"event_time_start":"2026-07-01","event_time_end":"2026-07-01","depends_on":[]},{"name":"mb_rolling_7d","layer":1,"event_time_start":"2026-06-28","event_time_end":"2026-07-05","depends_on":["mb_daily"]},{"name":"mb_rolling_14d","layer":2,"event_time_start":"2026-06-26","event_time_end":"2026-07-06","depends_on":["mb_rolling_7d"]},{"name":"mb_summary","layer":3,"event_time_start":"2026-06-25","event_time_end":"2026-07-07","depends_on":["mb_rolling_7d","mb_rolling_14d"]},{"name":"mb_wide","layer":3,"event_time_start":"2026-04-07","event_time_end":"2026-07-11","depends_on":["mb_rolling_14d"]}],"edges":[{"upstream":"mb_daily","downstream":"mb_rolling_7d"},{"upstream":"mb_rolling_7d","downstream":"mb_rolling_14d"},{"upstream":"mb_rolling_7d","downstream":"mb_summary"},{"upstream":"mb_rolling_14d","downstream":"mb_summary"},{"upstream":"mb_rolling_14d","downstream":"mb_wide"}]};
+
+(function () {
+  const data = window.ZHAO_DBT_PLAN_DATA;
+  const byName = new Map(data.nodes.map((n) => [n.name, n]));
+
+  const upstreamOf = new Map();
+  const downstreamOf = new Map();
+  for (const e of data.edges) {
+    if (!upstreamOf.has(e.downstream)) upstreamOf.set(e.downstream, []);
+    upstreamOf.get(e.downstream).push(e);
+    if (!downstreamOf.has(e.upstream)) downstreamOf.set(e.upstream, []);
+    downstreamOf.get(e.upstream).push(e);
+  }
+
+  const layersEl = document.getElementById("layers");
+  const edgesSvg = document.getElementById("edges");
+  const scrollEl = document.getElementById("graph-scroll");
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  let selectedName = null;
+  const nodeEls = new Map();
+  const edgeEls = [];
+
+  function byLayer() {
+    const grouped = new Map();
+    for (const n of data.nodes) {
+      if (!grouped.has(n.layer)) grouped.set(n.layer, []);
+      grouped.get(n.layer).push(n);
+    }
+    const keys = [...grouped.keys()].sort((a, b) => a - b);
+    return keys.map((k) => grouped.get(k).slice().sort((a, b) => a.name.localeCompare(b.name)));
+  }
+
+  function buildLayout() {
+    layersEl.innerHTML = "";
+    nodeEls.clear();
+    for (const members of byLayer()) {
+      const col = document.createElement("div");
+      col.className = "layer-col";
+      for (const n of members) {
+        const box = document.createElement("div");
+        box.className = "node-box";
+        box.dataset.name = n.name;
+
+        const nameEl = document.createElement("span");
+        nameEl.className = "node-name";
+        nameEl.textContent = n.name;
+        box.appendChild(nameEl);
+
+        const layerEl = document.createElement("span");
+        layerEl.className = "node-layer";
+        layerEl.textContent = "layer " + n.layer;
+        box.appendChild(layerEl);
+
+        const windowEl = document.createElement("span");
+        windowEl.className = "node-window";
+        windowEl.textContent = n.event_time_start + " .. " + n.event_time_end;
+        box.appendChild(windowEl);
+
+        box.addEventListener("click", () => selectNode(n.name));
+        col.appendChild(box);
+        nodeEls.set(n.name, box);
+      }
+      layersEl.appendChild(col);
+    }
+  }
+
+  function el(tag, attrs) {
+    const e = document.createElementNS(SVG_NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  function edgePath(x1, y1, x2, y2) {
+    const dx = Math.max(40, (x2 - x1) * 0.5);
+    return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+  }
+
+  function drawEdges() {
+    edgesSvg.innerHTML = "";
+    edgeEls.length = 0;
+    const w = layersEl.scrollWidth;
+    const h = layersEl.scrollHeight;
+    edgesSvg.setAttribute("width", w);
+    edgesSvg.setAttribute("height", h);
+    edgesSvg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+
+    const containerRect = layersEl.getBoundingClientRect();
+    for (const e of data.edges) {
+      const from = nodeEls.get(e.upstream);
+      const to = nodeEls.get(e.downstream);
+      if (!from || !to) continue;
+      const fr = from.getBoundingClientRect();
+      const tr = to.getBoundingClientRect();
+      const x1 = fr.right - containerRect.left;
+      const y1 = fr.top + fr.height / 2 - containerRect.top;
+      const x2 = tr.left - containerRect.left;
+      const y2 = tr.top + tr.height / 2 - containerRect.top;
+      const path = el("path", { class: "edge", d: edgePath(x1, y1, x2, y2) });
+      path.dataset.upstream = e.upstream;
+      path.dataset.downstream = e.downstream;
+      edgesSvg.appendChild(path);
+      edgeEls.push(path);
+    }
+  }
+
+  function render() {
+    buildLayout();
+    drawEdges();
+    applyHighlight();
+  }
+
+  function bfsLevel(startName) {
+    const ancestors = new Set();
+    const descendants = new Set();
+    let frontier = [startName];
+    let seen = new Set([startName]);
+    while (frontier.length) {
+      const next = [];
+      for (const name of frontier) {
+        for (const e of upstreamOf.get(name) || []) {
+          if (!seen.has(e.upstream)) { seen.add(e.upstream); ancestors.add(e.upstream); next.push(e.upstream); }
+        }
+      }
+      frontier = next;
+    }
+    frontier = [startName];
+    seen = new Set([startName]);
+    while (frontier.length) {
+      const next = [];
+      for (const name of frontier) {
+        for (const e of downstreamOf.get(name) || []) {
+          if (!seen.has(e.downstream)) { seen.add(e.downstream); descendants.add(e.downstream); next.push(e.downstream); }
+        }
+      }
+      frontier = next;
+    }
+    return { ancestors, descendants };
+  }
+
+  function applyHighlight() {
+    for (const g of nodeEls.values()) g.classList.remove("selected", "highlighted", "dimmed", "search-match");
+    for (const l of edgeEls) l.classList.remove("highlighted", "dimmed");
+
+    const term = document.getElementById("search").value.trim().toLowerCase();
+    if (term) {
+      for (const [name, g] of nodeEls) {
+        if (name.toLowerCase().includes(term)) g.classList.add("search-match");
+        else g.classList.add("dimmed");
+      }
+      for (const l of edgeEls) l.classList.add("dimmed");
+      return;
+    }
+
+    if (!selectedName) return;
+    const { ancestors, descendants } = bfsLevel(selectedName);
+    const related = new Set([selectedName, ...ancestors, ...descendants]);
+    for (const [name, g] of nodeEls) {
+      if (name === selectedName) g.classList.add("selected");
+      else if (related.has(name)) g.classList.add("highlighted");
+      else g.classList.add("dimmed");
+    }
+    for (const l of edgeEls) {
+      if (related.has(l.dataset.upstream) && related.has(l.dataset.downstream)) l.classList.add("highlighted");
+      else l.classList.add("dimmed");
+    }
+  }
+
+  function renderPanelList(listEl, names) {
+    listEl.innerHTML = "";
+    for (const name of names) {
+      const li = document.createElement("li");
+      li.textContent = name;
+      li.addEventListener("click", () => selectNode(name));
+      listEl.appendChild(li);
+    }
+  }
+
+  function renderPanel(name) {
+    const n = byName.get(name);
+    document.getElementById("panel-empty").style.display = "none";
+    document.getElementById("panel-content").style.display = "block";
+    document.getElementById("panel-title").textContent = n.name;
+    document.getElementById("panel-layer").textContent = "Layer " + n.layer;
+    document.getElementById("panel-window").textContent = n.event_time_start + " .. " + n.event_time_end;
+    renderPanelList(document.getElementById("panel-upstream"), n.depends_on);
+    const downstream = (downstreamOf.get(name) || []).map((e) => e.downstream);
+    renderPanelList(document.getElementById("panel-downstream"), downstream);
+  }
+
+  function selectNode(name) {
+    selectedName = name;
+    document.getElementById("search").value = "";
+    applyHighlight();
+    renderPanel(name);
+  }
+
+  document.getElementById("search").addEventListener("input", applyHighlight);
+
+  scrollEl.addEventListener("click", (ev) => {
+    if (ev.target === scrollEl || ev.target === layersEl || ev.target.id === "edges") {
+      selectedName = null;
+      applyHighlight();
+      document.getElementById("panel-empty").style.display = "block";
+      document.getElementById("panel-content").style.display = "none";
+    }
+  });
+
+  window.addEventListener("resize", drawEdges);
+
+  // Drag `#panel-resize-handle` to resize `#panel`, same convention
+  // `lineage_html.rs`'s own resize handle uses. Redraws edges afterward
+  // since the graph area's available width changes with the panel.
+  (function initPanelResize() {
+    const handle = document.getElementById("panel-resize-handle");
+    const panel = document.getElementById("panel");
+    const mainEl = document.getElementById("main");
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    handle.addEventListener("mousedown", (ev) => {
+      dragging = true;
+      startX = ev.clientX;
+      startWidth = panel.getBoundingClientRect().width;
+      handle.classList.add("resizing");
+      document.body.style.userSelect = "none";
+      ev.preventDefault();
+    });
+    document.addEventListener("mousemove", (ev) => {
+      if (!dragging) return;
+      const delta = startX - ev.clientX;
+      const maxWidth = Math.max(240, mainEl.getBoundingClientRect().width - 300);
+      const width = Math.min(maxWidth, Math.max(240, startWidth + delta));
+      panel.style.width = width + "px";
+      drawEdges();
+    });
+    document.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.classList.remove("resizing");
+      document.body.style.userSelect = "";
+    });
+  })();
+
+  render();
+})();
+
+</script>
+</body>
+</html>
