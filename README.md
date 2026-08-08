@@ -1,5 +1,8 @@
 # zhao-dbt-plan
 
+[![Crates.io](https://img.shields.io/crates/v/zhao-dbt-plan.svg)](https://crates.io/crates/zhao-dbt-plan)
+[![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
+
 **A static microbatch cascading time-window planner for dbt.** dbt's `microbatch` incremental
 strategy applies one flat `--event-time-start`/`--event-time-end` window across an entire
 selection — so when a rolling-window model reads a wider span than its immediate upstream was
@@ -34,6 +37,9 @@ whatever you already use.
 ```bash
 curl -fsSL https://raw.githubusercontent.com/allenhori/zhao-dbt-plan/master/scripts/install.sh | sh
 ```
+
+Rust users: `cargo install zhao-dbt-plan` (via
+[crates.io](https://crates.io/crates/zhao-dbt-plan)).
 
 ## Usage
 
