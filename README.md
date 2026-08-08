@@ -148,6 +148,11 @@ CI, disposable) don't need it. Writes a self-contained, interactive HTML file to
 runs never collide and nothing needs cleaning up) — a directory distinct from wherever the JSON's
 `--output-file` goes, and it never changes the JSON's own default path or contents.
 
+**[Open a live demo](https://htmlpreview.github.io/?https://github.com/allenhori/zhao-dbt-plan/blob/master/docs/assets/dbt-plan-demo.html)**
+(rendered via [htmlpreview.github.io](https://github.com/htmlpreview/htmlpreview.github.com),
+since GitHub shows raw HTML as source rather than rendering it — the
+[file itself](docs/assets/dbt-plan-demo.html) is also there to download and open locally).
+
 Each model is a node showing its full name, computed date-range window, and layer, laid out by
 layer with its downstream connections drawn so the cascading structure is visible without reading
 JSON at all. All interactivity (search, highlighting the upstream/downstream chain on selection,
