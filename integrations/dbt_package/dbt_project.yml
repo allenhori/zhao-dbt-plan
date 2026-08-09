@@ -1,0 +1,7 @@
+name: 'zhao_dbt_plan_macros'
+version: '0.1.0'
+config-version: 2
+
+# A pure-macro package -- no models/seeds/tests of its own, just the
+# wref()/zhao_window_start()/zhao_window_end() macros. See README.md.
+macro-paths: ["macros"]
