@@ -160,6 +160,18 @@ a resizable side panel) runs client-side in plain JavaScript against an embedded
 network access, no CDN reference anywhere, works fully offline. Model names are never truncated,
 regardless of length — node boxes wrap to fit the full name rather than clipping it.
 
+## Making the plan actually apply: `zhao_utils`
+
+`zhao-dbt-plan` computes the correct window — but on its own, it can't make dbt's compiled SQL
+actually *use* it. dbt's own microbatch `ref()` filtering can't be overridden by a project macro,
+so a plain `ref()` to a widened upstream still gets dbt's default single-batch window, silently.
+[`zhao_utils`](https://github.com/allenhori/zhao_dbt_utils) is a small, separately-licensed
+(Apache-2.0), separately-repo'd dbt package — `wref()` ("windowed ref"), a drop-in `ref()`
+replacement, plus two boundary helpers — that closes that gap, reading the exact same `meta.zhao`
+block this planner already does. Completely optional: it's for whoever's starting the
+rolling-window pattern fresh, and `zhao-dbt-plan` itself works identically without it. See its
+own README for install/usage.
+
 ## Flag reference
 
 | Flag | Default | What it does |
