@@ -34,9 +34,27 @@ whatever you already use.
 
 ## Install
 
+**macOS / Linux** — [Homebrew](https://brew.sh):
+
+```bash
+brew install allenhori/zhao/zhao-dbt-plan
+```
+
+**Windows** — [Scoop](https://scoop.sh):
+
+```powershell
+scoop bucket add zhao https://github.com/allenhori/zhao-scoop
+scoop install zhao-dbt-plan
+```
+
+**Any platform** — the install script:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/allenhori/zhao-dbt-plan/master/scripts/install.sh | sh
 ```
+
+Update with `brew upgrade zhao-dbt-plan` or `scoop update zhao-dbt-plan`; re-run the install
+script if you used that. Homebrew and Scoop carry stable releases only.
 
 Rust users: `cargo install zhao-dbt-plan` (via
 [crates.io](https://crates.io/crates/zhao-dbt-plan)).
