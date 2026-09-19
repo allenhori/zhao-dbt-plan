@@ -125,3 +125,15 @@ jobs:
           make_latest: ${{ steps.channel.outputs.prerelease == 'false' }}
           body: ${{ steps.channel.outputs.prerelease == 'true' && 'Automated build from the latest `master` -- not a stable release. May be broken; use a `v*` tag for anything you depend on.' || '' }}
           files: dist/*
+
+  # Keeps the Homebrew tap and Scoop bucket in step with every stable
+  # release -- stable only, since both package managers version by release.
+  # The work lives in update-packages.yml (also runnable by hand).
+  update-packages:
+    name: Update Homebrew tap and Scoop bucket
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/update-packages.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
