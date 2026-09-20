@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/allenhori/zhao-dbt-plan/master/docs/assets/logo.png" alt="zhao logo" width="128">
+</p>
+
 # zhao-dbt-plan
 
 [![Crates.io](https://img.shields.io/crates/v/zhao-dbt-plan.svg)](https://crates.io/crates/zhao-dbt-plan)
