@@ -190,6 +190,20 @@ block this planner already does. Completely optional: it's for whoever's startin
 rolling-window pattern fresh, and `zhao-dbt-plan` itself works identically without it. See its
 own README for install/usage.
 
+## Wiring it into your workflow
+
+`zhao-dbt-plan` reads the same top-level `zhao.yml` keys as `zhao-cli` (`dbt-command`,
+`dbt-args`, `against`), so if `zhao-cli` is already set up for your project, the dbt invocation
+is already right. Have a coding agent do the rest (local and CI, any CI system):
+
+> Read https://raw.githubusercontent.com/allenhori/zhao-cli/master/docs/ai-setup.md and set up
+> zhao for this repository. Then read
+> https://raw.githubusercontent.com/allenhori/zhao-dbt-plan/master/docs/ai-setup.md and add
+> zhao-dbt-plan.
+
+The addon-specific guide is [docs/ai-setup.md](docs/ai-setup.md). Do the `zhao-cli` guide first;
+this one only covers what `zhao-dbt-plan` adds.
+
 ## Flag reference
 
 | Flag | Default | What it does |
