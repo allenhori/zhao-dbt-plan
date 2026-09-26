@@ -51,14 +51,25 @@ scoop bucket add zhao https://github.com/allenhori/zhao-scoop
 scoop install zhao-dbt-plan
 ```
 
+**Python / dbt projects** — [PyPI](https://pypi.org/project/zhao-dbt-plan/), with
+[uv](https://docs.astral.sh/uv/) or pip:
+
+```bash
+uv tool install zhao-dbt-plan      # or: pip install zhao-dbt-plan
+```
+
+A pre-built binary in a wheel, no Rust toolchain needed — pin it next to `dbt-core` in your
+project's own dependencies so local dev and CI get the same version.
+
 **Any platform** — the install script:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/allenhori/zhao-dbt-plan/master/scripts/install.sh | sh
 ```
 
-Update with `brew upgrade zhao-dbt-plan` or `scoop update zhao-dbt-plan`; re-run the install
-script if you used that. Homebrew and Scoop carry stable releases only.
+Update with `brew upgrade zhao-dbt-plan`, `scoop update zhao-dbt-plan`, or
+`uv tool upgrade zhao-dbt-plan` / `pip install --upgrade zhao-dbt-plan`; re-run the install
+script if you used that. Homebrew, Scoop and PyPI carry stable releases only.
 
 Rust users: `cargo install zhao-dbt-plan` (via
 [crates.io](https://crates.io/crates/zhao-dbt-plan)).
